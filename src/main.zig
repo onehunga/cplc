@@ -1,5 +1,6 @@
 const std = @import("std");
 const lex = @import("lex.zig");
+const Parser = @import("Parser.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
@@ -11,14 +12,21 @@ pub fn main() !void {
     var tokens = try lex.lex(source, gpa.allocator());
     defer tokens.deinit(gpa.allocator());
 
-    for (0..tokens.len) |i| {
-        const token = tokens.get(i);
+    var ast = try Parser.parse(gpa.allocator(), tokens, source);
+    defer ast.deinit(gpa.allocator());
 
-        std.debug.print("{} ({}..{}) '{s}'\n", .{
-            token.tag,
-            token.location.start,
-            token.location.end,
-            source[token.location.start..token.location.end],
-        });
+    {
+        const print = std.debug.print;
+        const data = ast.nodes.items(.data);
+
+        for (ast.nodes.items(.tag), 0..) |tag, idx| {
+            defer print("\n", .{});
+            print("{}: {}({}, {})", .{ idx, tag, data[idx].lhs, data[idx].rhs });
+
+            switch (tag) {
+                .ident => print(" '{s}'", .{ast.literals.items[ast.nodes.get(idx).data.lhs]}),
+                else => {},
+            }
+        }
     }
 }
