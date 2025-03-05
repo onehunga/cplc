@@ -4,11 +4,19 @@ const mem = std.mem;
 const Ast = @import("Ast.zig");
 const lex = @import("lex.zig");
 
+const Precedence = enum {
+    none,
+    sum,
+    prod,
+    equal,
+    not_equal,
+};
+
 const ParseError = error{
     UnknownStatement,
     UnexpectedToken,
     EndOfFile,
-} || mem.Allocator.Error;
+} || mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
 allocator: mem.Allocator,
 tokens: lex.TokenList,
@@ -57,6 +65,7 @@ fn parseStmt(self: *Self) ParseError!void {
     return switch (self.currentToken()) {
         .comment => self.parseComment(),
         .func => self.parseFunction(),
+        .@"return" => self.parseReturn(),
         else => {
             return ParseError.UnknownStatement;
         },
@@ -68,6 +77,8 @@ fn parseComment(self: *Self) void {
 }
 
 fn parseFunction(self: *Self) ParseError!void {
+    const start = self.scratch.items.len;
+
     self.advance();
     const name = try self.parseFunctionName();
 
@@ -77,16 +88,24 @@ fn parseFunction(self: *Self) ParseError!void {
         std.debug.print("expected '{{'\n", .{});
         return ParseError.UnexpectedToken;
     }
+    self.advance();
 
     while (self.currentToken() != .right_brace) {
         try self.parseStmt();
         self.advance();
     }
 
-    var node: Ast.Node = .{ .tag = .func_decl, .data = .{}, .loc = name.loc };
-    node.data.lhs = try self.addNode(name);
-    node.data.rhs = try self.addNode(proto);
+    var node: Ast.Node = .{
+        .tag = .func_decl,
+        .data = .{},
+        .loc = name.loc,
+    };
+    const lhs = try self.addNode(name);
+    _ = try self.addNode(proto);
+    node.data = try self.addNodes(self.scratch.items[start..]);
+    node.data.lhs = lhs;
 
+    self.scratch.resize(self.allocator, start) catch unreachable;
     try self.scratch.append(self.allocator, node);
 }
 
@@ -129,6 +148,108 @@ fn parseFunctionName(self: *Self) ParseError!Ast.Node {
     };
 }
 
+fn parseReturn(self: *Self) !void {
+    const loc = self.locs[self.current];
+
+    self.advance();
+    var value: u32 = 0;
+    if (self.currentToken() != .semicolon) {
+        const expr = try self.parseExpression(.none);
+        value = try self.addNode(expr);
+        self.advance();
+    }
+
+    if (self.currentToken() != .semicolon) {
+        std.debug.print("expected an semicolon\n", .{});
+    }
+
+    try self.scratch.append(self.allocator, .{
+        .tag = .@"return",
+        .data = .{ .lhs = value },
+        .loc = loc,
+    });
+}
+
+fn parseExpression(self: *Self, prec: Precedence) ParseError!Ast.Node {
+    var lhs = try self.parsePrefix();
+
+    while (@intFromEnum(prec) < @intFromEnum(self.peekPrecedence())) {
+        self.advance();
+        lhs = try self.parseInfix(lhs);
+    }
+
+    return lhs;
+}
+
+fn parsePrefix(self: *Self) !Ast.Node {
+    return switch (self.currentToken()) {
+        .int => self.parseInt(),
+        .float => self.parseFloat(),
+        else => ParseError.UnexpectedToken,
+    };
+}
+
+fn parseInt(self: *Self) !Ast.Node {
+    const loc = self.locs[self.current];
+    const lit = self.source[loc.start..loc.end];
+
+    const num = try std.fmt.parseUnsigned(u64, lit, 10);
+
+    return Ast.Node{
+        .tag = .int,
+        .data = .{
+            .lhs = @intCast(num >> 32),
+            .rhs = @truncate(num),
+        },
+        .loc = loc,
+    };
+}
+
+fn parseFloat(self: *Self) !Ast.Node {
+    const loc = self.locs[self.current];
+    const lit = self.source[loc.start..loc.end];
+
+    const num = try std.fmt.parseFloat(f64, lit);
+    const bits: u64 = @bitCast(num);
+
+    return Ast.Node{
+        .tag = .float,
+        .data = .{
+            .lhs = @intCast(bits >> 32),
+            .rhs = @truncate(bits),
+        },
+        .loc = loc,
+    };
+}
+
+fn parseInfix(self: *Self, lhs: Ast.Node) !Ast.Node {
+    return switch (self.currentToken()) {
+        .plus => self.parseBinary(lhs, .add, .sum),
+        .minus => self.parseBinary(lhs, .sub, .sum),
+        .star => self.parseBinary(lhs, .mul, .prod),
+        .slash => self.parseBinary(lhs, .div, .prod),
+        .equal => self.parseBinary(lhs, .equal, .equal),
+        .not_equal => self.parseBinary(lhs, .not_equal, .not_equal),
+        else => ParseError.UnexpectedToken,
+    };
+}
+
+fn parseBinary(self: *Self, lhs: Ast.Node, tag: Ast.Node.Tag, prec: Precedence) !Ast.Node {
+    const loc = self.locs[self.current];
+    self.advance();
+
+    const rhs = try self.parseExpression(prec);
+
+    return Ast.Node{
+        .tag = tag,
+        .data = .{
+            .lhs = try self.addNode(lhs),
+            .rhs = try self.addNode(rhs),
+        },
+        .loc = loc,
+    };
+}
+
 fn parseType(self: *Self) !Ast.Node {
     return switch (self.currentToken()) {
         .ident => self.parseNamedType(),
@@ -150,8 +271,34 @@ fn parseNamedType(self: *Self) !Ast.Node {
     };
 }
 
+fn peekPrecedence(self: *const Self) Precedence {
+    if (self.peekToken()) |tok| {
+        return matchPrecedence(tok);
+    }
+
+    return .none;
+}
+
+fn matchPrecedence(tag: lex.Token.Tag) Precedence {
+    return switch (tag) {
+        .plus, .minus => .sum,
+        .star, .slash => .prod,
+        .equal => .equal,
+        .not_equal => .not_equal,
+        else => .none,
+    };
+}
+
 fn currentToken(self: *const Self) lex.Token.Tag {
     return self.tags[self.current];
+}
+
+fn peekToken(self: *const Self) ?lex.Token.Tag {
+    if (1 + self.current > self.tokens.len) {
+        return null;
+    }
+
+    return self.tags[self.current + 1];
 }
 
 fn consume(self: *Self, tag: lex.Token.Tag) !bool {

@@ -62,6 +62,24 @@ pub const Node = struct {
         /// nodes[lhs..rhs]
         range,
 
+        /// return statement
+        ///
+        /// if lhs != 0
+        @"return",
+
+        /// integer uses the lhs and rhs fields to store a 64 bit unsigned integer
+        int,
+
+        /// stores a 64bit float number in the lhs and rhs field
+        float,
+
+        add,
+        sub,
+        mul,
+        div,
+        equal,
+        not_equal,
+
         /// identifier
         ///
         /// lhs = index into literals

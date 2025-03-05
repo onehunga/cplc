@@ -24,7 +24,20 @@ pub fn main() !void {
             print("{}: {}({}, {})", .{ idx, tag, data[idx].lhs, data[idx].rhs });
 
             switch (tag) {
-                .ident => print(" '{s}'", .{ast.literals.items[ast.nodes.get(idx).data.lhs]}),
+                .ident => print(" '{s}'", .{ast.literals.items[data[idx].lhs]}),
+                .int => {
+                    var bits: u64 = data[idx].rhs;
+                    bits |= @as(u64, @intCast(data[idx].lhs)) << 32;
+
+                    print(" '{}'", .{bits});
+                },
+                .float => {
+                    var bits: u64 = data[idx].rhs;
+                    bits |= @as(u64, @intCast(data[idx].lhs)) << 32;
+                    const float: f64 = @bitCast(bits);
+
+                    print(" '{}'", .{float});
+                },
                 else => {},
             }
         }
