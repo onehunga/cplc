@@ -1,9 +1,9 @@
 .{
-    .name = "cplc",
+    .name = .cplc,
     .version = "0.0.0",
-    //.minimum_zig_version = "0.11.0",
-    .dependencies = .{
-    },
+    .fingerprint = 0x41d5fbe872a8f3d3,
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",
