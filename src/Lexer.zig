@@ -1,3 +1,4 @@
+const Self = @This();
 const std = @import("std");
 const ascii = std.ascii;
 const mem = std.mem;
@@ -15,172 +16,168 @@ const KEYWORDS = std.StaticStringMap(Token.Tag).initComptime(.{
     .{ "false", .false },
 });
 
-const Lexer = struct {
-    source: []const u8,
-    tokens: TokenList = .{},
-    allocator: mem.Allocator,
+source: []const u8,
+tokens: TokenList = .{},
+allocator: mem.Allocator,
 
-    ch: u8 = 0,
-    pos: u32 = 0,
+ch: u8 = 0,
+pos: u32 = 0,
 
-    pub fn init(source: []const u8, allocator: mem.Allocator) Self {
-        return Self{
-            .source = source,
-            .allocator = allocator,
-        };
+pub fn init(source: []const u8, allocator: mem.Allocator) Self {
+    return Self{
+        .source = source,
+        .allocator = allocator,
+    };
+}
+
+fn advance(self: *Self) void {
+    if (self.pos < self.source.len) {
+        self.ch = self.source[self.pos];
+        self.pos += 1;
+    } else {
+        self.ch = 0;
+    }
+}
+
+fn next(self: *Self) !void {
+    self.advance();
+    try self.skipWhitespace();
+
+    if (ascii.isDigit(self.ch)) {
+        try self.number();
+        return;
+    }
+    if (ascii.isAlphabetic(self.ch)) {
+        try self.identifier();
+        return;
     }
 
-    fn advance(self: *Self) void {
-        if (self.pos < self.source.len) {
-            self.ch = self.source[self.pos];
-            self.pos += 1;
-        } else {
-            self.ch = 0;
+    try switch (self.ch) {
+        '(' => self.singleToken(.left_paren),
+        ')' => self.singleToken(.right_paren),
+        '{' => self.singleToken(.left_brace),
+        '}' => self.singleToken(.right_brace),
+        '[' => self.singleToken(.left_bracket),
+        ']' => self.singleToken(.right_bracket),
+        '+' => self.singleToken(.plus),
+        '-' => self.singleToken(.minus),
+        '*' => self.singleToken(.star),
+        '/' => self.singleToken(.slash),
+        '.' => self.singleToken(.dot),
+        ',' => self.singleToken(.comma),
+        ':' => self.singleToken(.colon),
+        ';' => self.singleToken(.semicolon),
+        '=' => self.doubleToken('=', .assign, .equal),
+        '!' => self.doubleToken('=', .bang, .not_equal),
+        '<' => self.doubleToken('=', .less_than, .less_equal),
+        '>' => self.doubleToken('=', .greater_than, .greater_equal),
+        else => {},
+    };
+}
+
+/// handles all non code characters
+fn skipWhitespace(self: *Self) !void {
+    while (true) {
+        switch (self.ch) {
+            '/' => {
+                if (self.peek() == '/') {
+                    try self.comment();
+                } else {
+                    return;
+                }
+            },
+            ' ', '\t', '\n', '\r' => self.advance(),
+            else => return,
         }
     }
+}
 
-    fn next(self: *Self) !void {
+fn comment(self: *Self) !void {
+    const start = self.pos - 1;
+
+    while (self.ch != '\n') {
         self.advance();
-        try self.skipWhitespace();
-
-        if (ascii.isDigit(self.ch)) {
-            try self.number();
-            return;
-        }
-        if (ascii.isAlphabetic(self.ch)) {
-            try self.identifier();
-            return;
-        }
-
-        try switch (self.ch) {
-            '(' => self.singleToken(.left_paren),
-            ')' => self.singleToken(.right_paren),
-            '{' => self.singleToken(.left_brace),
-            '}' => self.singleToken(.right_brace),
-            '[' => self.singleToken(.left_bracket),
-            ']' => self.singleToken(.right_bracket),
-            '+' => self.singleToken(.plus),
-            '-' => self.singleToken(.minus),
-            '*' => self.singleToken(.star),
-            '/' => self.singleToken(.slash),
-            '.' => self.singleToken(.dot),
-            ',' => self.singleToken(.comma),
-            ':' => self.singleToken(.colon),
-            ';' => self.singleToken(.semicolon),
-            '=' => self.doubleToken('=', .assign, .equal),
-            '!' => self.doubleToken('=', .bang, .not_equal),
-            '<' => self.doubleToken('=', .less_than, .less_equal),
-            '>' => self.doubleToken('=', .greater_than, .greater_equal),
-            else => {},
-        };
     }
 
-    /// handles all non code characters
-    fn skipWhitespace(self: *Self) !void {
-        while (true) {
-            switch (self.ch) {
-                '/' => {
-                    if (self.peek() == '/') {
-                        try self.comment();
-                    } else {
-                        return;
-                    }
-                },
-                ' ', '\t', '\n', '\r' => self.advance(),
-                else => return,
-            }
-        }
+    try self.tokens.append(self.allocator, .{
+        .tag = .comment,
+        .location = .{ .start = start, .end = self.pos },
+    });
+}
+
+fn number(self: *Self) !void {
+    const start = self.pos - 1;
+    var is_float = false;
+
+    while (ascii.isDigit(self.peek())) {
+        self.advance();
     }
-
-    fn comment(self: *Self) !void {
-        const start = self.pos - 1;
-
-        while (self.ch != '\n') {
-            self.advance();
-        }
-
-        try self.tokens.append(self.allocator, .{
-            .tag = .comment,
-            .location = .{ .start = start, .end = self.pos },
-        });
-    }
-
-    fn number(self: *Self) !void {
-        const start = self.pos - 1;
-        var is_float = false;
-
+    if (self.peek() == '.') {
+        self.advance();
+        is_float = true;
         while (ascii.isDigit(self.peek())) {
             self.advance();
         }
-        if (self.peek() == '.') {
-            self.advance();
-            is_float = true;
-            while (ascii.isDigit(self.peek())) {
-                self.advance();
-            }
-        }
-
-        try self.tokens.append(self.allocator, .{
-            .tag = if (is_float) .float else .int,
-            .location = .{ .start = start, .end = self.pos },
-        });
     }
 
-    fn identifier(self: *Self) !void {
-        const start = self.pos - 1;
+    try self.tokens.append(self.allocator, .{
+        .tag = if (is_float) .float else .int,
+        .location = .{ .start = start, .end = self.pos },
+    });
+}
 
-        while (ascii.isAlphanumeric(self.peek())) {
-            self.advance();
-        }
+fn identifier(self: *Self) !void {
+    const start = self.pos - 1;
 
-        const span = self.source[start..self.pos];
-        const tag = KEYWORDS.get(span) orelse .ident;
-
-        try self.tokens.append(self.allocator, .{
-            .tag = tag,
-            .location = .{ .start = start, .end = self.pos },
-        });
+    while (ascii.isAlphanumeric(self.peek())) {
+        self.advance();
     }
 
-    fn singleToken(self: *Self, tag: Token.Tag) !void {
+    const span = self.source[start..self.pos];
+    const tag = KEYWORDS.get(span) orelse .ident;
+
+    try self.tokens.append(self.allocator, .{
+        .tag = tag,
+        .location = .{ .start = start, .end = self.pos },
+    });
+}
+
+fn singleToken(self: *Self, tag: Token.Tag) !void {
+    try self.tokens.append(self.allocator, .{
+        .tag = tag,
+        .location = self.location(1),
+    });
+}
+
+fn doubleToken(self: *Self, expected: u8, single: Token.Tag, double: Token.Tag) !void {
+    if (self.peek() == expected) {
+        self.advance();
         try self.tokens.append(self.allocator, .{
-            .tag = tag,
+            .tag = double,
+            .location = self.location(2),
+        });
+    } else {
+        try self.tokens.append(self.allocator, .{
+            .tag = single,
             .location = self.location(1),
         });
     }
+}
 
-    fn doubleToken(self: *Self, expected: u8, single: Token.Tag, double: Token.Tag) !void {
-        if (self.peek() == expected) {
-            self.advance();
-            try self.tokens.append(self.allocator, .{
-                .tag = double,
-                .location = self.location(2),
-            });
-        } else {
-            try self.tokens.append(self.allocator, .{
-                .tag = single,
-                .location = self.location(1),
-            });
-        }
+fn location(self: *const Self, length: u32) Token.Location {
+    return Token.Location{
+        .start = self.pos - length,
+        .end = self.pos,
+    };
+}
+
+fn peek(self: *const Self) u8 {
+    if (self.pos < self.source.len) {
+        return self.source[self.pos];
+    } else {
+        return 0;
     }
-
-    fn location(self: *const Self, length: u32) Token.Location {
-        return Token.Location{
-            .start = self.pos - length,
-            .end = self.pos,
-        };
-    }
-
-    fn peek(self: *const Self) u8 {
-        if (self.pos < self.source.len) {
-            return self.source[self.pos];
-        } else {
-            return 0;
-        }
-    }
-
-    const Self = @This();
-};
+}
 
 pub const Token = struct {
     tag: Tag,
@@ -230,7 +227,7 @@ pub const Token = struct {
 };
 
 pub fn lex(source: []const u8, allocator: mem.Allocator) !TokenList {
-    var lexer = Lexer.init(source, allocator);
+    var lexer = Self.init(source, allocator);
 
     while (lexer.pos < lexer.source.len) {
         try lexer.next();

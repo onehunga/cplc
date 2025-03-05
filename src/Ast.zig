@@ -5,7 +5,7 @@
 const Self = @This();
 const std = @import("std");
 const mem = std.mem;
-const lex = @import("lex.zig");
+const Lexer = @import("Lexer.zig");
 
 nodes: Node.List,
 literals: std.ArrayListUnmanaged([]const u8),
@@ -25,7 +25,7 @@ pub fn deinit(self: *Self, allocator: mem.Allocator) void {
 pub const Node = struct {
     tag: Tag,
     data: Data,
-    loc: lex.Token.Location,
+    loc: Lexer.Token.Location,
 
     pub const Tag = enum {
         /// root node is a list of statements

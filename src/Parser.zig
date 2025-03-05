@@ -2,7 +2,7 @@ const Self = @This();
 const std = @import("std");
 const mem = std.mem;
 const Ast = @import("Ast.zig");
-const lex = @import("lex.zig");
+const Lexer = @import("Lexer.zig");
 
 const Precedence = enum {
     none,
@@ -19,10 +19,10 @@ const ParseError = error{
 } || mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 
 allocator: mem.Allocator,
-tokens: lex.TokenList,
+tokens: Lexer.TokenList,
 source: []const u8,
-tags: []const lex.Token.Tag,
-locs: []const lex.Token.Location,
+tags: []const Lexer.Token.Tag,
+locs: []const Lexer.Token.Location,
 current: usize = 0,
 
 nodes: Ast.Node.List = .{},
@@ -30,7 +30,7 @@ literals: std.ArrayListUnmanaged([]const u8) = .{},
 
 scratch: std.ArrayListUnmanaged(Ast.Node) = .{},
 
-fn init(allocator: mem.Allocator, tokens: lex.TokenList, source: []const u8) Self {
+fn init(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) Self {
     return .{
         .allocator = allocator,
         .tokens = tokens,
@@ -279,7 +279,7 @@ fn peekPrecedence(self: *const Self) Precedence {
     return .none;
 }
 
-fn matchPrecedence(tag: lex.Token.Tag) Precedence {
+fn matchPrecedence(tag: Lexer.Token.Tag) Precedence {
     return switch (tag) {
         .plus, .minus => .sum,
         .star, .slash => .prod,
@@ -289,11 +289,11 @@ fn matchPrecedence(tag: lex.Token.Tag) Precedence {
     };
 }
 
-fn currentToken(self: *const Self) lex.Token.Tag {
+fn currentToken(self: *const Self) Lexer.Token.Tag {
     return self.tags[self.current];
 }
 
-fn peekToken(self: *const Self) ?lex.Token.Tag {
+fn peekToken(self: *const Self) ?Lexer.Token.Tag {
     if (1 + self.current > self.tokens.len) {
         return null;
     }
@@ -301,7 +301,7 @@ fn peekToken(self: *const Self) ?lex.Token.Tag {
     return self.tags[self.current + 1];
 }
 
-fn consume(self: *Self, tag: lex.Token.Tag) !bool {
+fn consume(self: *Self, tag: Lexer.Token.Tag) !bool {
     if (self.current > self.tokens.len) {
         return ParseError.EndOfFile;
     }
@@ -314,7 +314,7 @@ fn consume(self: *Self, tag: lex.Token.Tag) !bool {
     return true;
 }
 
-fn takeToken(self: *Self, tag: lex.Token.Tag, comptime fmt: []const u8, args: anytype) ParseError!lex.Token.Location {
+fn takeToken(self: *Self, tag: Lexer.Token.Tag, comptime fmt: []const u8, args: anytype) ParseError!Lexer.Token.Location {
     if (self.currentToken() != tag) {
         std.debug.print(fmt, args);
 
@@ -361,7 +361,7 @@ fn addLiteral(self: *Self, literal: []const u8) !u32 {
     return @intCast(self.literals.items.len - 1);
 }
 
-pub fn parse(allocator: mem.Allocator, tokens: lex.TokenList, source: []const u8) ParseError!Ast {
+pub fn parse(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) ParseError!Ast {
     var parser = Self.init(allocator, tokens, source);
     defer parser.deinit();
     try parser.setupAst();
