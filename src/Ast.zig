@@ -73,6 +73,19 @@ pub const Node = struct {
         /// stores a 64bit float number in the lhs and rhs field
         float,
 
+        /// stores either a 1 or 0 in lhs depending if the value is true or false
+        bool,
+
+        /// represents a range of nodes as a block
+        scope,
+
+        /// Represents an if expression or statement.
+        ///
+        /// Contains multiple elements defined as `nodes[lhs..rhs]`.
+        /// If the range contains two elements it has no else,
+        /// otherwise it has an else as a third statement
+        @"if",
+
         add,
         sub,
         mul,

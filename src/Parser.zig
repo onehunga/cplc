@@ -66,9 +66,7 @@ fn parseStmt(self: *Self) ParseError!void {
         .comment => self.parseComment(),
         .func => self.parseFunction(),
         .@"return" => self.parseReturn(),
-        else => {
-            return ParseError.UnknownStatement;
-        },
+        else => self.parseExpressionStmt(),
     };
 }
 
@@ -88,7 +86,6 @@ fn parseFunction(self: *Self) ParseError!void {
         std.debug.print("expected '{{'\n", .{});
         return ParseError.UnexpectedToken;
     }
-    self.advance();
 
     while (self.currentToken() != .right_brace) {
         try self.parseStmt();
@@ -170,6 +167,18 @@ fn parseReturn(self: *Self) !void {
     });
 }
 
+fn parseExpressionStmt(self: *Self) !void {
+    const expr = try self.parseExpression(.none);
+    self.advance();
+
+    if (self.currentToken() != .semicolon) {
+        std.debug.print("expected semicolon {}\n", .{self.currentToken()});
+        return ParseError.UnexpectedToken;
+    }
+
+    try self.scratch.append(self.allocator, expr);
+}
+
 fn parseExpression(self: *Self, prec: Precedence) ParseError!Ast.Node {
     var lhs = try self.parsePrefix();
 
@@ -185,6 +194,9 @@ fn parsePrefix(self: *Self) !Ast.Node {
     return switch (self.currentToken()) {
         .int => self.parseInt(),
         .float => self.parseFloat(),
+        .true, .false => self.parseBool(),
+        .left_brace => self.parseScope(),
+        .@"if" => self.parseIf(),
         else => ParseError.UnexpectedToken,
     };
 }
@@ -219,6 +231,74 @@ fn parseFloat(self: *Self) !Ast.Node {
             .rhs = @truncate(bits),
         },
         .loc = loc,
+    };
+}
+
+fn parseBool(self: *Self) Ast.Node {
+    const value: u32 = switch (self.currentToken()) {
+        .true => 1,
+        .false => 0,
+        else => unreachable,
+    };
+
+    return Ast.Node{
+        .tag = .bool,
+        .data = .{ .lhs = value },
+        .loc = self.locs[self.current],
+    };
+}
+
+fn parseScope(self: *Self) !Ast.Node {
+    const offset = self.scratch.items.len;
+    const start = self.locs[self.current];
+
+    self.advance();
+
+    while (self.currentToken() != .right_brace) {
+        try self.parseStmt();
+        self.advance();
+    }
+
+    const scope: Ast.Node = .{
+        .tag = .scope,
+        .data = try self.addNodes(self.scratch.items[offset..]),
+        .loc = start,
+    };
+
+    try self.scratch.resize(self.allocator, offset);
+
+    return scope;
+}
+
+fn parseIf(self: *Self) !Ast.Node {
+    const start = self.locs[self.current];
+    self.advance();
+
+    const condition = try self.parseExpression(.none);
+    self.advance();
+
+    const then = try self.parseExpression(.none);
+
+    var el: ?Ast.Node = null;
+    if (self.peekToken() == .@"else") {
+        self.advance();
+        self.advance();
+
+        el = try self.parseExpression(.none);
+    }
+
+    var data: Ast.Node.Data = .{
+        .lhs = try self.addNode(condition),
+        .rhs = try self.addNode(then),
+    };
+    if (el) |e| {
+        data.rhs = try self.addNode(e);
+    }
+
+    return Ast.Node{
+        .tag = .@"if",
+        .data = data,
+        .loc = start,
     };
 }
 

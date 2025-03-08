@@ -1,7 +1,10 @@
 // comment
 func main() bool {
-	// if true {
+	if true {
 		return 4.20 == 6.9;
-	// }
+	};
+	if 1 == 2 0 else {
+		return 1 == 2;
+	};
 	return 1 + 2;
 }
