@@ -62,6 +62,15 @@ pub const Node = struct {
         /// nodes[lhs..rhs]
         range,
 
+        /// nodes[lhs] = name
+        /// nodes[rhs] = value
+        var_decl,
+
+        /// nodes[lhs] = name
+        /// nodes[lhs + 1] = type
+        /// nodes[rhs] = value
+        typed_var_decl,
+
         /// return statement
         ///
         /// if lhs != 0

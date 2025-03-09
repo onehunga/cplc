@@ -1,5 +1,6 @@
 // comment
 func main() bool {
+	var a u32 = 0;
 	if true {
 		return 4.20 == 6.9;
 	};

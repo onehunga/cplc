@@ -65,6 +65,7 @@ fn parseStmt(self: *Self) ParseError!void {
     return switch (self.currentToken()) {
         .comment => self.parseComment(),
         .func => self.parseFunction(),
+        .@"var" => self.parseVariable(),
         .@"return" => self.parseReturn(),
         else => self.parseExpressionStmt(),
     };
@@ -135,6 +136,62 @@ fn parseFunctionProto(self: *Self) ParseError!Ast.Node {
 
 fn parseFunctionName(self: *Self) ParseError!Ast.Node {
     const name = try self.takeToken(.ident, "expected a function name", .{});
+    const lit = self.source[name.start..name.end];
+    const ref = try self.addLiteral(lit);
+
+    return .{
+        .tag = .ident,
+        .data = .{ .lhs = ref },
+        .loc = name,
+    };
+}
+
+fn parseVariable(self: *Self) ParseError!void {
+    const loc = self.locs[self.current];
+    self.advance();
+
+    var values: [3]Ast.Node = undefined;
+
+    const name = try self.parseVariableName();
+    values[0] = name;
+
+    var tag: Ast.Node.Tag = .var_decl;
+    if (self.currentToken() != .assign) {
+        tag = .typed_var_decl;
+
+        const ty = try self.parseType();
+        self.advance();
+        values[1] = ty;
+    }
+
+    if (try self.consume(.assign)) {
+        const value = try self.parseExpression(.none);
+        self.advance();
+
+        if (tag == .typed_var_decl) {
+            values[2] = value;
+        } else {
+            values[1] = value;
+        }
+    }
+
+    if (self.currentToken() != .semicolon) {
+        std.debug.print("expected a semicolon after a variable\n", .{});
+    }
+
+    const data = try if (tag == .var_decl) self.addNodes(values[0..2]) else self.addNodes(values[0..3]);
+
+    const v: Ast.Node = .{
+        .tag = tag,
+        .data = data,
+        .loc = loc,
+    };
+
+    try self.scratch.append(self.allocator, v);
+}
+
+fn parseVariableName(self: *Self) ParseError!Ast.Node {
+    const name = try self.takeToken(.ident, "expected a variable name", .{});
     const lit = self.source[name.start..name.end];
     const ref = try self.addLiteral(lit);
 
