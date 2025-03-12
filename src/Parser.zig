@@ -253,6 +253,7 @@ fn parsePrefix(self: *Self) !Ast.Node {
         .float => self.parseFloat(),
         .true, .false => self.parseBool(),
         .left_brace => self.parseScope(),
+        .left_bracket => self.parseArrayLiteral(),
         .@"if" => self.parseIf(),
         else => ParseError.UnexpectedToken,
     };
@@ -327,6 +328,31 @@ fn parseScope(self: *Self) !Ast.Node {
     return scope;
 }
 
+fn parseArrayLiteral(self: *Self) !Ast.Node {
+    const start = self.locs[self.current];
+    self.advance();
+
+    var nodes: std.ArrayListUnmanaged(Ast.Node) = .{};
+    defer nodes.deinit(self.allocator);
+
+    while (self.currentToken() != .right_bracket) {
+        try nodes.append(self.allocator, try self.parseExpression(.none));
+        self.advance();
+
+        switch (self.currentToken()) {
+            .comma => self.advance(),
+            .right_bracket => break,
+            else => return ParseError.UnexpectedToken,
+        }
+    }
+
+    return Ast.Node{
+        .tag = .array_literal,
+        .data = try self.addNodes(nodes.items),
+        .loc = start,
+    };
+}
+
 fn parseIf(self: *Self) !Ast.Node {
     const start = self.locs[self.current];
     self.advance();
@@ -390,7 +416,29 @@ fn parseBinary(self: *Self, lhs: Ast.Node, tag: Ast.Node.Tag, prec: Precedence) 
 fn parseType(self: *Self) !Ast.Node {
     return switch (self.currentToken()) {
         .ident => self.parseNamedType(),
+        .left_bracket => self.parseArrayType(),
         else => ParseError.UnexpectedToken,
+    };
+}
+
+fn parseArrayType(self: *Self) ParseError!Ast.Node {
+    const start = self.locs[self.current];
+    self.advance();
+
+    const ty = try self.parseType();
+    self.advance();
+
+    if (self.currentToken() != .right_bracket) {
+        std.debug.print("expected ']'\n", .{});
+        return ParseError.UnexpectedToken;
+    }
+
+    return Ast.Node{
+        .tag = .slice,
+        .data = .{
+            .lhs = try self.addNode(ty),
+        },
+        .loc = start,
     };
 }
 

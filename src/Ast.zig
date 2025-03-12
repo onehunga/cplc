@@ -88,6 +88,11 @@ pub const Node = struct {
         /// represents a range of nodes as a block
         scope,
 
+        /// represents a range of nodes
+        ///
+        /// nodes[lhs..rhs]
+        array_literal,
+
         /// Represents an if expression or statement.
         ///
         /// Contains multiple elements defined as `nodes[lhs..rhs]`.
@@ -106,6 +111,15 @@ pub const Node = struct {
         ///
         /// lhs = index into literals
         ident,
+
+        // ---------------------------
+        // --- Type Specific Nodes ---
+        // ---------------------------
+
+        /// a slice type is an array type without a compile time known size
+        ///
+        /// nodes[lhs] = base type
+        slice,
     };
 
     pub const Data = struct {
