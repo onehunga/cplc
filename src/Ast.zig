@@ -52,9 +52,8 @@ pub const Node = struct {
 
         /// a function parameter is represented as as:
         ///
-        /// nodes[lhs] = type
-        ///
-        /// nodes[rhs] = name
+        /// nodes[lhs] = name
+        /// nodes[rhs] = type
         func_param,
 
         /// a general range of nodes

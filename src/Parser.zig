@@ -78,10 +78,15 @@ fn parseComment(self: *Self) void {
 fn parseFunction(self: *Self) ParseError!void {
     const start = self.scratch.items.len;
 
+    try self.scratch.append(self.allocator, undefined);
+    try self.scratch.append(self.allocator, undefined);
+
     self.advance();
     const name = try self.parseFunctionName();
+    self.scratch.items[start] = name;
 
     const proto = try self.parseFunctionProto();
+    self.scratch.items[start + 1] = proto;
 
     if (!try self.consume(.left_brace)) {
         std.debug.print("expected '{{'\n", .{});
@@ -98,40 +103,68 @@ fn parseFunction(self: *Self) ParseError!void {
         .data = .{},
         .loc = name.loc,
     };
-    const lhs = try self.addNode(name);
-    _ = try self.addNode(proto);
     node.data = try self.addNodes(self.scratch.items[start..]);
-    node.data.lhs = lhs;
 
     self.scratch.resize(self.allocator, start) catch unreachable;
     try self.scratch.append(self.allocator, node);
 }
 
 fn parseFunctionProto(self: *Self) ParseError!Ast.Node {
-    var nodes: std.ArrayListUnmanaged(Ast.Node) = .{};
-    defer nodes.deinit(self.allocator);
+    const start = self.scratch.items.len;
 
-    const start = self.locs[self.current];
+    try self.scratch.append(self.allocator, undefined);
+
+    const start_loc = self.locs[self.current];
     if (!try self.consume(.left_paren)) {
         return ParseError.UnexpectedToken;
     }
 
     while (self.currentToken() != .right_paren) {
+        const name = try self.takeToken(.ident, "expected a parameter name", .{});
+        const ty = try self.parseType();
+
+        const param = Ast.Node{
+            .tag = .func_param,
+            .data = .{
+                .lhs = try self.addNode(.{
+                    .tag = .ident,
+                    .data = .{ .lhs = try self.addLiteral(self.source[name.start..name.end]) },
+                    .loc = name,
+                }),
+                .rhs = try self.addNode(ty),
+            },
+            .loc = .{
+                .start = name.start,
+                .end = ty.loc.end,
+            },
+        };
+
+        try self.scratch.append(self.allocator, param);
+
         self.advance();
+
+        switch (self.currentToken()) {
+            .comma => self.advance(),
+            .right_paren => break,
+            else => std.debug.print("expected ',' or ')'\n", .{}),
+        }
     }
     self.advance();
 
-    try nodes.append(self.allocator, try self.parseType());
+    self.scratch.items[start] = try self.parseType();
     self.advance();
 
-    return Ast.Node{
+    const node = Ast.Node{
         .tag = .func_proto,
-        .data = try self.addNodes(nodes.items),
+        .data = try self.addNodes(self.scratch.items[start..]),
         .loc = .{
-            .start = start.start,
+            .start = start_loc.start,
             .end = self.locs[self.current].end,
         },
     };
+
+    try self.scratch.resize(self.allocator, start);
+    return node;
 }
 
 fn parseFunctionName(self: *Self) ParseError!Ast.Node {

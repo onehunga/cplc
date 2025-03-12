@@ -10,3 +10,6 @@ func main() bool {
 	};
 	return 1 + 2;
 }
+
+func foo(foo u32, bar u32,) void {
+}
