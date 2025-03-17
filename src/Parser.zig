@@ -13,7 +13,7 @@ const Precedence = enum {
 };
 
 const ParserState = enum {
-    root,
+    default,
     struct_body,
 };
 
@@ -35,7 +35,7 @@ literals: std.ArrayListUnmanaged([]const u8) = .{},
 
 scratch: std.ArrayListUnmanaged(Ast.Node) = .{},
 
-state: ParserState = .root,
+state: ParserState = .default,
 
 fn init(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) Self {
     return .{
@@ -69,15 +69,18 @@ fn parseRoot(self: *Self) ParseError!void {
 }
 
 fn parseStmt(self: *Self) ParseError!void {
+    const state = self.pushState(.default);
+    defer self.restoreState(state);
+
     return switch (self.currentToken()) {
         .comment => self.parseComment(),
         .@"struct" => self.parseStruct(),
         .func => self.parseFunction(),
         .@"var" => self.parseVariable(),
         .@"return" => self.parseReturn(),
-        else => switch (self.state) {
+        else => switch (state) {
+            .default => self.parseExpressionStmt(),
             .struct_body => self.parseFieldDecl(),
-            else => self.parseExpressionStmt(),
         },
     };
 }
@@ -131,8 +134,6 @@ fn parseStructName(self: *Self) !Ast.Node {
 }
 
 fn parseFieldDecl(self: *Self) !void {
-    std.debug.print("parsing field_decl\n", .{});
-
     if (self.currentToken() != .ident) {
         return ParseError.InvalidCharacter;
     }
@@ -543,8 +544,39 @@ fn parseBinary(self: *Self, lhs: Ast.Node, tag: Ast.Node.Tag, prec: Precedence) 
 fn parseType(self: *Self) !Ast.Node {
     return switch (self.currentToken()) {
         .ident => self.parseNamedType(),
+        .left_paren => self.parseTupleType(),
         .left_bracket => self.parseArrayType(),
         else => ParseError.UnexpectedToken,
+    };
+}
+
+fn parseTupleType(self: *Self) ParseError!Ast.Node {
+    const start = self.scratch.items.len;
+
+    const start_loc = self.locs[self.current];
+    self.advance();
+
+    while (self.currentToken() != .right_paren) {
+        const ty = try self.parseType();
+        self.advance();
+        try self.addScratch(ty);
+
+        switch (self.currentToken()) {
+            .comma => self.advance(),
+            .right_paren => break,
+            else => {
+                return ParseError.UnexpectedToken;
+            },
+        }
+    }
+
+    return Ast.Node{
+        .tag = .tuple,
+        .data = try self.addFromScratch(start),
+        .loc = .{
+            .start = start_loc.start,
+            .end = self.locs[self.current].end,
+        },
     };
 }
 

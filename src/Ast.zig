@@ -155,6 +155,11 @@ pub const Node = struct {
         // --- Type Specific Nodes ---
         // ---------------------------
 
+        /// a tuple type definition
+        ///
+        /// nodes[lhs..rhs] = types of the tuple
+        tuple,
+
         /// a slice type is an array type without a compile time known size
         ///
         /// nodes[lhs] = base type
@@ -359,7 +364,7 @@ const PrettyPrinter = struct {
 
             self.pushIndent(true);
             defer self.popIndent();
-            try self.printType(data.rhs);
+            try self.printType(data.rhs, true);
         }
     }
 
@@ -382,7 +387,7 @@ const PrettyPrinter = struct {
 
                 self.pushIndent(false);
                 defer self.popIndent();
-                try self.printType(data.lhs + 1);
+                try self.printType(data.lhs + 1, true);
             }
 
             try self.printIndentation(true);
@@ -533,24 +538,36 @@ const PrettyPrinter = struct {
         }
     }
 
-    fn printType(self: *PrettyPrinter, idx: usize) !void {
+    fn printType(self: *PrettyPrinter, idx: usize, last: bool) !void {
         return switch (self.tags[idx]) {
             .ident => {
                 const data = self.data[idx];
                 const name = self.ast.literals.items[data.lhs];
-                try self.printIndentation(true);
+                try self.printIndentation(last);
                 try self.writer.print("'{s}'\n", .{name});
+            },
+            .tuple => {
+                const data = self.data[idx];
+                try self.printIndentation(last);
+                try self.writer.writeAll("tuple\n");
+
+                self.pushIndent(true);
+                defer self.popIndent();
+
+                for (data.lhs..data.rhs) |node_ptr| {
+                    try self.printType(node_ptr, node_ptr == data.rhs - 1);
+                }
             },
             .slice => {
                 const data = self.data[idx];
-                try self.printIndentation(true);
+                try self.printIndentation(last);
                 try self.writer.writeAll("slice\n");
 
                 {
                     self.pushIndent(true);
                     defer self.popIndent();
 
-                    try self.printType(data.lhs);
+                    try self.printType(data.lhs, true);
                 }
             },
             else => {},
