@@ -12,6 +12,11 @@ const Precedence = enum {
     not_equal,
 };
 
+const ParserState = enum {
+    root,
+    struct_body,
+};
+
 const ParseError = error{
     UnknownStatement,
     UnexpectedToken,
@@ -29,6 +34,8 @@ nodes: Ast.Node.List = .{},
 literals: std.ArrayListUnmanaged([]const u8) = .{},
 
 scratch: std.ArrayListUnmanaged(Ast.Node) = .{},
+
+state: ParserState = .root,
 
 fn init(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) Self {
     return .{
@@ -64,15 +71,88 @@ fn parseRoot(self: *Self) ParseError!void {
 fn parseStmt(self: *Self) ParseError!void {
     return switch (self.currentToken()) {
         .comment => self.parseComment(),
+        .@"struct" => self.parseStruct(),
         .func => self.parseFunction(),
         .@"var" => self.parseVariable(),
         .@"return" => self.parseReturn(),
-        else => self.parseExpressionStmt(),
+        else => switch (self.state) {
+            .struct_body => self.parseFieldDecl(),
+            else => self.parseExpressionStmt(),
+        },
     };
 }
 
 fn parseComment(self: *Self) void {
     _ = self;
+}
+
+fn parseStruct(self: *Self) !void {
+    const start = self.scratch.items.len;
+    const start_loc = self.locs[self.current];
+
+    self.advance();
+
+    const struct_name = try self.parseStructName();
+    try self.addScratch(struct_name);
+
+    if (self.currentToken() != .left_brace) {
+        return ParseError.InvalidCharacter;
+    }
+    self.advance();
+
+    {
+        const state = self.pushState(.struct_body);
+        defer self.restoreState(state);
+        while (self.currentToken() != .right_brace) {
+            try self.parseStmt();
+            self.advance();
+        }
+    }
+
+    const node: Ast.Node = .{
+        .tag = .struct_decl,
+        .data = try self.addFromScratch(start),
+        .loc = start_loc,
+    };
+
+    try self.addScratch(node);
+}
+
+fn parseStructName(self: *Self) !Ast.Node {
+    const name = try self.takeToken(.ident, "expected a structure name name", .{});
+    const lit = self.source[name.start..name.end];
+    const ref = try self.addLiteral(lit);
+
+    return .{
+        .tag = .ident,
+        .data = .{ .lhs = ref },
+        .loc = name,
+    };
+}
+
+fn parseFieldDecl(self: *Self) !void {
+    std.debug.print("parsing field_decl\n", .{});
+
+    if (self.currentToken() != .ident) {
+        return ParseError.InvalidCharacter;
+    }
+    const name = try self.parseIdent();
+    self.advance();
+
+    const ty = try self.parseType();
+    self.advance();
+
+    try self.addScratch(.{
+        .tag = .field_decl,
+        .data = .{
+            .lhs = try self.addNode(name),
+            .rhs = try self.addNode(ty),
+        },
+        .loc = .{
+            .start = name.loc.start,
+            .end = ty.loc.end,
+        },
+    });
 }
 
 fn parseFunction(self: *Self) ParseError!void {
@@ -285,6 +365,7 @@ fn parsePrefix(self: *Self) !Ast.Node {
         .int => self.parseInt(),
         .float => self.parseFloat(),
         .true, .false => self.parseBool(),
+        .ident => self.parseIdent(),
         .left_brace => self.parseScope(),
         .left_bracket => self.parseArrayLiteral(),
         .@"if" => self.parseIf(),
@@ -336,6 +417,19 @@ fn parseBool(self: *Self) Ast.Node {
         .tag = .bool,
         .data = .{ .lhs = value },
         .loc = self.locs[self.current],
+    };
+}
+
+fn parseIdent(self: *Self) !Ast.Node {
+    const loc = self.locs[self.current];
+    const ident = self.source[loc.start..loc.end];
+
+    return .{
+        .tag = .ident,
+        .data = .{
+            .lhs = try self.addLiteral(ident),
+        },
+        .loc = loc,
     };
 }
 
@@ -577,6 +671,29 @@ fn addLiteral(self: *Self, literal: []const u8) !u32 {
     try self.literals.append(self.allocator, literal);
 
     return @intCast(self.literals.items.len - 1);
+}
+
+fn addScratch(self: *Self, node: Ast.Node) !void {
+    return self.scratch.append(self.allocator, node);
+}
+
+fn addFromScratch(self: *Self, start: usize) !Ast.Node.Data {
+    const slice = self.scratch.items[start..];
+    const data = try self.addNodes(slice);
+
+    try self.scratch.resize(self.allocator, start);
+
+    return data;
+}
+
+fn pushState(self: *Self, state: ParserState) ParserState {
+    const old = self.state;
+    self.state = state;
+    return old;
+}
+
+fn restoreState(self: *Self, state: ParserState) void {
+    self.state = state;
 }
 
 pub fn parse(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) ParseError!Ast {

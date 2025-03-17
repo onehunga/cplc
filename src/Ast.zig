@@ -65,6 +65,14 @@ pub const Node = struct {
         /// nodes[lhs..rhs]
         root,
 
+        /// struct definition
+        ///
+        /// nodes[lhs] = name
+        /// nodes[lhs + 1..rhs] = fields in the struct
+        struct_decl,
+
+        field_decl,
+
         /// a function declaration is represented in a range of nodes
         ///
         /// the range has a garanteed length of at least 2 and is of the form:
@@ -201,6 +209,8 @@ const PrettyPrinter = struct {
         const tag = self.tags[idx];
 
         try switch (tag) {
+            .struct_decl => self.printStruct(idx, last),
+            .field_decl => self.printFieldDecl(idx, last),
             .func_decl => self.printFunction(idx, last),
             .var_decl => self.printVarDecl(idx, last),
             .typed_var_decl => self.printVarDecl(idx, last),
@@ -220,6 +230,64 @@ const PrettyPrinter = struct {
             .not_equal => self.printBinop(idx, last, "not_equal"),
             else => {},
         };
+    }
+
+    fn printStruct(self: *PrettyPrinter, idx: usize, last: bool) !void {
+        const data = self.data[idx];
+
+        try self.printIndentation(last);
+        try self.writer.writeAll("struct\n");
+
+        self.pushIndent(last);
+        defer self.popIndent();
+
+        {
+            const name_idx = self.data[data.lhs].lhs;
+            const name = self.ast.literals.items[name_idx];
+
+            try self.printIndentation(false);
+            try self.writer.print("name: '{s}'\n", .{name});
+        }
+
+        {
+            try self.printIndentation(true);
+            try self.writer.writeAll("body\n");
+
+            self.pushIndent(true);
+            defer self.popIndent();
+
+            for (data.lhs + 1..data.rhs) |node_ptr| {
+                try self.printNode(node_ptr, node_ptr == data.rhs - 1);
+            }
+        }
+    }
+
+    fn printFieldDecl(self: *PrettyPrinter, idx: usize, last: bool) !void {
+        const data = self.data[idx];
+
+        try self.printIndentation(last);
+        try self.writer.writeAll("field\n");
+
+        self.pushIndent(last);
+        defer self.popIndent();
+
+        {
+            try self.printIndentation(false);
+            try self.writer.writeAll("name\n");
+
+            self.pushIndent(false);
+            defer self.popIndent();
+            try self.printNode(data.lhs, true);
+        }
+
+        {
+            try self.printIndentation(true);
+            try self.writer.writeAll("type\n");
+
+            self.pushIndent(true);
+            defer self.popIndent();
+            try self.printType(data.rhs, false);
+        }
     }
 
     fn printFunction(self: *PrettyPrinter, idx: usize, last: bool) !void {
