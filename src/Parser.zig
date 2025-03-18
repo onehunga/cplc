@@ -18,6 +18,8 @@ const ParserState = enum {
 };
 
 const ParseError = error{
+    ParseError,
+
     UnknownStatement,
     UnexpectedToken,
     EndOfFile,
@@ -367,6 +369,7 @@ fn parsePrefix(self: *Self) !Ast.Node {
         .float => self.parseFloat(),
         .true, .false => self.parseBool(),
         .ident => self.parseIdent(),
+        .left_paren => self.parseParenExpr(),
         .left_brace => self.parseScope(),
         .left_bracket => self.parseArrayLiteral(),
         .@"if" => self.parseIf(),
@@ -431,6 +434,46 @@ fn parseIdent(self: *Self) !Ast.Node {
             .lhs = try self.addLiteral(ident),
         },
         .loc = loc,
+    };
+}
+
+/// either a parenthesized expression or a tuple
+fn parseParenExpr(self: *Self) !Ast.Node {
+    const loc_start = self.locs[self.current];
+    self.advance();
+
+    const first = try self.parseExpression(.none);
+    if (self.peekToken() == .comma) {
+        return self.parseTouple(loc_start, first);
+    }
+
+    self.advance(); // skip ')'
+
+    return first;
+}
+
+fn parseTouple(self: *Self, start_location: Lexer.Token.Location, first: Ast.Node) !Ast.Node {
+    self.advance();
+    self.advance();
+
+    const start = self.scratch.items.len;
+    try self.addScratch(first);
+
+    while (self.currentToken() != .right_paren) {
+        try self.addScratch(try self.parseExpression(.none));
+        self.advance();
+
+        switch (self.currentToken()) {
+            .right_paren => break,
+            .comma => self.advance(),
+            else => return self.errorf("Expected ',' or ')'\n", .{}),
+        }
+    }
+
+    return Ast.Node{
+        .tag = .tuple_literal,
+        .data = try self.addFromScratch(start),
+        .loc = start_location,
     };
 }
 
@@ -726,6 +769,14 @@ fn pushState(self: *Self, state: ParserState) ParserState {
 
 fn restoreState(self: *Self, state: ParserState) void {
     self.state = state;
+}
+
+fn errorf(self: *Self, comptime fmt: []const u8, args: anytype) ParseError {
+    _ = self;
+
+    std.debug.print(fmt, args);
+
+    return ParseError.ParseError;
 }
 
 pub fn parse(allocator: mem.Allocator, tokens: Lexer.TokenList, source: []const u8) ParseError!Ast {

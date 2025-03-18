@@ -15,6 +15,6 @@ pub fn main() !void {
     var ast = try Parser.parse(gpa.allocator(), tokens, source);
     defer ast.deinit(gpa.allocator());
 
-    try ast.dump(std.io.getStdOut().writer());
+    // try ast.dump(std.io.getStdOut().writer());
     try ast.prettyPrint(std.io.getStdOut().writer());
 }

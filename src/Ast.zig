@@ -132,6 +132,9 @@ pub const Node = struct {
         /// represents a range of nodes as a block
         scope,
 
+        /// nodes[lhs..rhs]
+        tuple_literal,
+
         /// represents a range of nodes
         ///
         /// nodes[lhs..rhs]
@@ -225,6 +228,7 @@ const PrettyPrinter = struct {
             .float => self.printFloat(idx, last),
             .ident => self.printIdent(idx, last),
             .scope => self.printScope(idx, last),
+            .tuple_literal => self.printTupleLiteral(idx, last),
             .array_literal => self.printArrayLiteral(idx, last),
             .@"if" => self.printIf(idx, last),
             .add => self.printBinop(idx, last, "add"),
@@ -454,6 +458,22 @@ const PrettyPrinter = struct {
 
         try self.printIndentation(last);
         try self.writer.writeAll("scope\n");
+
+        {
+            self.pushIndent(last);
+            defer self.popIndent();
+
+            for (data.lhs..data.rhs) |index| {
+                try self.printNode(index, index == data.rhs - 1);
+            }
+        }
+    }
+
+    fn printTupleLiteral(self: *PrettyPrinter, idx: usize, last: bool) !void {
+        const data = self.data[idx];
+
+        try self.printIndentation(last);
+        try self.writer.writeAll("tuple\n");
 
         {
             self.pushIndent(last);

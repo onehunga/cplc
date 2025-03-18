@@ -8,14 +8,14 @@ struct Foo {
 func main() bool {
 	var a u32 = 0;
 	var b [u32] = [1, 2];
-	var c (u32, s32, [u32]) = 0;
+	var c (u32, s32, [u32]) = (1, 2, [1, 2, 3]);
 	if true {
 		return 4.20 == 6.9;
 	};
 	if 1 == 2 0 else {
 		return 1 == 2;
 	};
-	return 1 + 2;
+	return 1 + 2 * 3;
 }
 
 func foo(foo u32, bar u32,) void {
