@@ -6,10 +6,10 @@ const Lexer = @import("Lexer.zig");
 
 const Precedence = enum {
     none,
-    sum,
-    prod,
     equal,
     not_equal,
+    sum,
+    prod,
     field,
 };
 
