@@ -154,6 +154,10 @@ pub const Node = struct {
         equal,
         not_equal,
 
+        /// nodes[lhs] = callee
+        /// nodes[lhs + 1..rhs] = arguments
+        call,
+
         member,
 
         // ---------------------------
@@ -239,6 +243,7 @@ const PrettyPrinter = struct {
             .div => self.printBinop(idx, last, "div"),
             .equal => self.printBinop(idx, last, "equal"),
             .not_equal => self.printBinop(idx, last, "not_equal"),
+            .call => self.printCall(idx, last),
             .member => self.printMember(idx, last),
             else => {},
         };
@@ -558,6 +563,32 @@ const PrettyPrinter = struct {
 
             try self.printNode(self.data[idx].lhs, false);
             try self.printNode(self.data[idx].rhs, true);
+        }
+    }
+
+    fn printCall(self: *PrettyPrinter, idx: usize, last: bool) !void {
+        const data = self.data[idx];
+
+        try self.printIndentation(last);
+        try self.writer.writeAll("call\n");
+
+        {
+            self.pushIndent(last);
+            defer self.popIndent();
+
+            try self.printNode(data.lhs, false);
+
+            {
+                try self.printIndentation(true);
+                try self.writer.writeAll("args\n");
+
+                self.pushIndent(true);
+                defer self.popIndent();
+
+                for (data.lhs + 1..data.rhs) |index| {
+                    try self.printNode(index, index == data.rhs - 1);
+                }
+            }
         }
     }
 

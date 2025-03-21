@@ -10,6 +10,7 @@ const Precedence = enum {
     not_equal,
     sum,
     prod,
+    call,
     field,
 };
 
@@ -565,6 +566,7 @@ fn parseInfix(self: *Self, lhs: Ast.Node) !Ast.Node {
         .slash => self.parseBinary(lhs, .div, .prod),
         .equal => self.parseBinary(lhs, .equal, .equal),
         .not_equal => self.parseBinary(lhs, .not_equal, .not_equal),
+        .left_paren => self.parseCall(lhs),
         .dot => self.parseMember(lhs),
         else => ParseError.UnexpectedToken,
     };
@@ -583,6 +585,32 @@ fn parseBinary(self: *Self, lhs: Ast.Node, tag: Ast.Node.Tag, prec: Precedence) 
             .rhs = try self.addNode(rhs),
         },
         .loc = loc,
+    };
+}
+
+fn parseCall(self: *Self, callee: Ast.Node) !Ast.Node {
+    const start = self.scratch.items.len;
+    try self.addScratch(callee);
+
+    const start_loc = self.locs[self.current];
+    self.advance(); // skip '('
+
+    while (self.currentToken() != .right_paren) {
+        const arg = try self.parseExpression(.none);
+        try self.addScratch(arg);
+        self.advance();
+
+        switch (self.currentToken()) {
+            .right_paren => break,
+            .comma => self.advance(),
+            else => return self.errorf("expected either a ',' or a ')'", .{}),
+        }
+    }
+
+    return .{
+        .tag = .call,
+        .data = try self.addFromScratch(start),
+        .loc = start_loc,
     };
 }
 
@@ -715,6 +743,7 @@ fn matchPrecedence(tag: Lexer.Token.Tag) Precedence {
         .star, .slash => .prod,
         .equal => .equal,
         .not_equal => .not_equal,
+        .left_paren => .call,
         .dot => .field,
         else => .none,
     };
