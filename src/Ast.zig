@@ -154,6 +154,8 @@ pub const Node = struct {
         equal,
         not_equal,
 
+        member,
+
         // ---------------------------
         // --- Type Specific Nodes ---
         // ---------------------------
@@ -237,6 +239,7 @@ const PrettyPrinter = struct {
             .div => self.printBinop(idx, last, "div"),
             .equal => self.printBinop(idx, last, "equal"),
             .not_equal => self.printBinop(idx, last, "not_equal"),
+            .member => self.printMember(idx, last),
             else => {},
         };
     }
@@ -295,7 +298,7 @@ const PrettyPrinter = struct {
 
             self.pushIndent(true);
             defer self.popIndent();
-            try self.printType(data.rhs, false);
+            try self.printType(data.rhs, true);
         }
     }
 
@@ -556,6 +559,10 @@ const PrettyPrinter = struct {
             try self.printNode(self.data[idx].lhs, false);
             try self.printNode(self.data[idx].rhs, true);
         }
+    }
+
+    fn printMember(self: *PrettyPrinter, idx: usize, last: bool) !void {
+        try self.printBinop(idx, last, "member");
     }
 
     fn printType(self: *PrettyPrinter, idx: usize, last: bool) !void {

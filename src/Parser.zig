@@ -10,6 +10,7 @@ const Precedence = enum {
     prod,
     equal,
     not_equal,
+    field,
 };
 
 const ParserState = enum {
@@ -564,6 +565,7 @@ fn parseInfix(self: *Self, lhs: Ast.Node) !Ast.Node {
         .slash => self.parseBinary(lhs, .div, .prod),
         .equal => self.parseBinary(lhs, .equal, .equal),
         .not_equal => self.parseBinary(lhs, .not_equal, .not_equal),
+        .dot => self.parseMember(lhs),
         else => ParseError.UnexpectedToken,
     };
 }
@@ -582,6 +584,47 @@ fn parseBinary(self: *Self, lhs: Ast.Node, tag: Ast.Node.Tag, prec: Precedence) 
         },
         .loc = loc,
     };
+}
+
+/// `ref` is the member
+fn parseMember(self: *Self, ref: Ast.Node) !Ast.Node {
+    var loc = self.locs[self.current];
+    self.advance();
+
+    var field = try self.parsePrefix();
+
+    var node: Ast.Node = .{
+        .tag = .member,
+        .data = .{
+            .lhs = try self.addNode(ref),
+            .rhs = try self.addNode(field),
+        },
+        .loc = loc,
+    };
+
+    while (self.peekToken() == .dot) {
+        self.advance();
+        loc = self.locs[self.current];
+        self.advance();
+
+        field = try self.parsePrefix();
+
+        node = .{
+            .tag = .member,
+            .data = .{
+                .lhs = try self.addNode(node),
+                .rhs = try self.addNode(field),
+            },
+            .loc = loc,
+        };
+    }
+
+    // if (self.peekToken() == .dot) {
+    //     std.log.info("nested member access is not supported yet\n", .{});
+    //     std.process.exit(0);
+    // }
+
+    return node;
 }
 
 fn parseType(self: *Self) !Ast.Node {
@@ -672,6 +715,7 @@ fn matchPrecedence(tag: Lexer.Token.Tag) Precedence {
         .star, .slash => .prod,
         .equal => .equal,
         .not_equal => .not_equal,
+        .dot => .field,
         else => .none,
     };
 }
