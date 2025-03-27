@@ -20,13 +20,15 @@ pub fn main() !void {
     var table = collect(&ast, gpa.allocator());
     defer table.deinit(gpa.allocator());
 
-    printSymbols(&table, table.root);
+    printSymbols(&table, 0);
 
     // try ast.dump(std.io.getStdOut().writer());
     // try ast.prettyPrint(std.io.getStdOut().writer());
 }
 
-fn printSymbols(table: *const Table, symbols: []const Table.Symbol) void {
+fn printSymbols(table: *const Table, scope: Table.Scope.Id) void {
+    const symbols = table.getSymbols(table.scopes[scope].symbols);
+
     for (symbols) |sym| {
         printSymbol(table, sym);
     }
@@ -37,11 +39,11 @@ fn printSymbol(table: *const Table, symbol: Table.Symbol) void {
 
     switch (symbol.tag) {
         .@"struct" => {
-            printSymbols(table, table.getSymbols(symbol.data.@"struct".children));
+            printSymbols(table, symbol.data.@"struct".body);
         },
         .func => {
-            printSymbols(table, table.getSymbols(symbol.data.func.args));
-            printSymbols(table, table.getSymbols(symbol.data.func.body));
+            printSymbols(table, symbol.data.func.args);
+            printSymbols(table, symbol.data.func.body);
         },
         .field, .@"var" => {},
     }

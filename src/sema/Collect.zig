@@ -9,7 +9,10 @@ ast: *const Ast,
 tags: []Node.Tag,
 data: []Node.Data,
 symbols: std.ArrayListUnmanaged(Table.Symbol) = .empty,
+scopes: std.ArrayListUnmanaged(Table.Scope) = .empty,
 scratch: std.ArrayListUnmanaged(Table.Symbol) = .empty,
+
+current_scope: Table.Scope.Id = 0,
 
 pub fn collect(ast: *const Ast, alloc: std.mem.Allocator) Table {
     var self = Self{
@@ -20,6 +23,8 @@ pub fn collect(ast: *const Ast, alloc: std.mem.Allocator) Table {
     };
     defer self.scratch.deinit(alloc);
 
+    self.scopes.append(alloc, undefined) catch unreachable;
+
     const root = self.data[0];
 
     for (ast.nodes.items(.tag)[root.lhs..root.rhs], root.lhs..) |tag, idx| {
@@ -27,7 +32,14 @@ pub fn collect(ast: *const Ast, alloc: std.mem.Allocator) Table {
     }
 
     const root_scope = self.addFromScratch(0);
-    return .init(root_scope, self.symbols.toOwnedSlice(alloc) catch unreachable);
+    self.scopes.items[0] = .{
+        .parent = null,
+        .symbols = root_scope,
+    };
+    return .init(
+        self.symbols.toOwnedSlice(alloc) catch unreachable,
+        self.scopes.toOwnedSlice(alloc) catch unreachable,
+    );
 }
 
 fn collectNode(self: *Self, tag: Node.Tag, idx: usize) void {
@@ -53,12 +65,17 @@ fn collectStruct(self: *Self, idx: usize) void {
         self.collectNode(self.tags[node_ptr], node_ptr);
     }
 
+    const scope = self.addScope(.{
+        .parent = self.current_scope,
+        .symbols = self.addFromScratch(start),
+    });
+
     const sym: Table.Symbol = .{
         .tag = .@"struct",
         .name = name,
         .data = .{
             .@"struct" = .{
-                .children = self.addFromScratch(start),
+                .body = scope,
             },
         },
     };
@@ -88,13 +105,19 @@ fn collectFunction(self: *Self, idx: usize) void {
     for (proto_data.lhs + 1..proto_data.rhs) |node_ptr| {
         self.collectNode(self.tags[node_ptr], node_ptr);
     }
-    const args = self.addFromScratch(start_args);
+    const args = self.addScope(.{
+        .parent = self.current_scope,
+        .symbols = self.addFromScratch(start_args),
+    });
 
     const start_body = self.scratch.items.len;
     for (data.lhs + 2..data.rhs) |node_ptr| {
         self.collectNode(self.tags[node_ptr], node_ptr);
     }
-    const body = self.addFromScratch(start_body);
+    const body = self.addScope(.{
+        .parent = args,
+        .symbols = self.addFromScratch(start_body),
+    });
 
     const sym: Table.Symbol = .{
         .tag = .func,
@@ -151,4 +174,9 @@ fn addFromScratch(self: *Self, start: usize) Table.Symbols {
         .start = @truncate(first),
         .len = @truncate(self.symbols.items.len - first),
     };
+}
+
+fn addScope(self: *Self, scope: Table.Scope) Table.Scope.Id {
+    self.scopes.append(self.alloc, scope) catch unreachable;
+    return @truncate(self.scopes.items.len - 1);
 }
