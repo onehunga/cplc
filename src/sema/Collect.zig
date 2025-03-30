@@ -3,6 +3,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Node = Ast.Node;
 const Table = @import("../ast/Table.zig");
+const type_interner = @import("../ast/type_interner.zig");
 
 alloc: std.mem.Allocator,
 ast: *const Ast,
@@ -75,9 +76,11 @@ fn collectStruct(self: *Self, idx: usize) void {
         .name = name,
         .data = .{
             .@"struct" = .{
+                .ty = type_interner.reserveType() catch unreachable,
                 .body = scope,
             },
         },
+        .ref = @truncate(idx),
     };
     self.addToScratch(sym);
 }
@@ -91,6 +94,7 @@ fn collectField(self: *Self, idx: usize) void {
         .tag = .field,
         .name = name,
         .data = .empty,
+        .ref = @truncate(idx),
     };
     self.addToScratch(sym);
 }
@@ -128,6 +132,7 @@ fn collectFunction(self: *Self, idx: usize) void {
                 .body = body,
             },
         },
+        .ref = @truncate(idx),
     };
     self.addToScratch(sym);
 }
@@ -141,6 +146,7 @@ fn collectParameter(self: *Self, idx: usize) void {
         .tag = .field,
         .name = name,
         .data = .empty,
+        .ref = @truncate(idx),
     };
     self.addToScratch(sym);
 }
@@ -154,6 +160,7 @@ fn collectVariable(self: *Self, idx: usize) void {
         .tag = .@"var",
         .name = name,
         .data = .empty,
+        .ref = @truncate(idx),
     };
     self.addToScratch(sym);
 }

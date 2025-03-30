@@ -2,11 +2,16 @@ const std = @import("std");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 const Table = @import("ast/Table.zig");
-const collect = @import("sema/Collect.zig").collect;
+const collectSymbols = @import("sema/Collect.zig").collect;
+const solve_types = @import("sema/solve_types.zig");
+const type_interner = @import("ast/type_interner.zig");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+
+    try type_interner.initialize(gpa.allocator());
+    defer type_interner.free();
 
     const source = try std.fs.cwd().readFileAlloc(gpa.allocator(), "test/main.cpl", 30_000);
     defer gpa.allocator().free(source);
@@ -17,10 +22,11 @@ pub fn main() !void {
     var ast = try Parser.parse(gpa.allocator(), tokens, source);
     defer ast.deinit(gpa.allocator());
 
-    var table = collect(&ast, gpa.allocator());
+    var table = collectSymbols(&ast, gpa.allocator());
     defer table.deinit(gpa.allocator());
 
-    printSymbols(&table, 0);
+    // printSymbols(&table, 0);
+    try solve_types.collectTypes(&ast, gpa.allocator(), &table);
 
     // try ast.dump(std.io.getStdOut().writer());
     // try ast.prettyPrint(std.io.getStdOut().writer());

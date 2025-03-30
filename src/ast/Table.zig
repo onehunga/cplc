@@ -1,5 +1,6 @@
 const Self = @This();
 const std = @import("std");
+const Type = @import("Type.zig");
 
 symbols: []const Symbol,
 scopes: []const Scope,
@@ -18,6 +19,22 @@ pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
 
 pub fn getSymbols(self: *const Self, symbols: Symbols) []const Symbol {
     return self.symbols[symbols.start..][0..symbols.len];
+}
+
+pub fn lookupSymbol(self: *const Self, scope: Scope.Id, name: []const u8) ?Symbol {
+    const symbols = self.getSymbols(self.scopes[scope].symbols);
+
+    for (symbols) |symbol| {
+        if (std.mem.eql(u8, symbol.name, name)) {
+            return symbol;
+        }
+    }
+
+    if (self.scopes[scope].parent) |parent| {
+        return self.lookupSymbol(parent, name);
+    }
+
+    return null;
 }
 
 pub const Scope = struct {
@@ -41,6 +58,7 @@ pub const Symbol = struct {
     tag: Tag,
     name: []const u8,
     data: Data,
+    ref: u32, // ast index
 
     pub const Tag = enum {
         @"struct",
@@ -61,6 +79,7 @@ pub const Symbol = struct {
 };
 
 pub const StructData = struct {
+    ty: Type.Id,
     body: Scope.Id,
 };
 
