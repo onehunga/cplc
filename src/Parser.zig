@@ -367,6 +367,11 @@ fn parseExpression(self: *Self, prec: Precedence) ParseError!Ast.Node {
 
 fn parsePrefix(self: *Self) !Ast.Node {
     return switch (self.currentToken()) {
+        .undefined => .{
+            .tag = .undefined,
+            .loc = self.locs[self.current],
+            .data = .{},
+        },
         .int => self.parseInt(),
         .float => self.parseFloat(),
         .true, .false => self.parseBool(),

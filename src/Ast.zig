@@ -115,6 +115,9 @@ pub const Node = struct {
         /// if lhs != 0
         @"return",
 
+        /// initialize an empty value
+        undefined,
+
         /// integer uses the lhs and rhs fields to store a 64 bit unsigned integer
         int,
 
@@ -236,6 +239,7 @@ const PrettyPrinter = struct {
             .var_decl => self.printVarDecl(idx, last),
             .typed_var_decl => self.printVarDecl(idx, last),
             .@"return" => self.printReturn(idx, last),
+            .undefined => self.printUndefined(last),
             .bool => self.printBool(idx, last),
             .int => self.printInt(idx, last),
             .float => self.printFloat(idx, last),
@@ -430,6 +434,11 @@ const PrettyPrinter = struct {
 
             try self.printNode(data.lhs, true);
         }
+    }
+
+    fn printUndefined(self: *PrettyPrinter, last: bool) !void {
+        try self.printIndentation(last);
+        try self.writer.writeAll("undefined\n");
     }
 
     fn printBool(self: *PrettyPrinter, idx: usize, last: bool) !void {
