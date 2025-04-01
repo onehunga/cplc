@@ -1,8 +1,11 @@
 const std = @import("std");
+const Build = std.Build;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const check_only = b.option(bool, "check", "only check") orelse false;
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -16,6 +19,11 @@ pub fn build(b: *std.Build) void {
         .use_llvm = optimize != .Debug,
         .use_lld = optimize != .Debug,
     });
+
+    if (check_only) {
+        b.default_step.dependOn(&exe.step);
+        return;
+    }
 
     b.installArtifact(exe);
 
