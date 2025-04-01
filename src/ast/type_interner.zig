@@ -55,6 +55,14 @@ pub fn getOrPut(ty: Type) !Type.Id {
     return addType(ty);
 }
 
+pub fn getSymbol(id: Type.Id) ?Type {
+    if (id.id >= self.types.items.len) {
+        return null;
+    }
+
+    return self.types.items[id.id];
+}
+
 fn fillBuiltinTypes() !void {
     _ = try addType(.{ .tag = .unknown, .data = .empty });
     _ = try addType(.{ .tag = .void, .data = .empty });
@@ -81,7 +89,7 @@ fn addType(sym: Type) !Type.Id {
 
 fn findType(ty: Type) ?Type.Id {
     for (self.types.items, 0..) |sym, i| {
-        if (Type.equals(sym, ty)) {
+        if (sym.equals(ty)) {
             return .init(@truncate(i));
         }
     }

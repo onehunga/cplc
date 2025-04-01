@@ -9,8 +9,8 @@ struct Foo {
 func main() bool {
 	var a u32 = 0;
 	var b [u32] = [1, 2];
-	var c (u32, s32, [u32]) = (1, 2, [1, 2, 3]);
-	var d = c.b.a * 2;
+	var c (u32, u32, [u32]) = (1, 2, [1, 2, 3]);
+	var d u32 = c.1;
 	if true {
 		return 4.20 == 6.9;
 	};

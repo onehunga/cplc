@@ -178,6 +178,13 @@ pub const Node = struct {
     pub const Data = struct {
         lhs: u32 = 0,
         rhs: u32 = 0,
+
+        pub fn decodeInt(self: Data) u64 {
+            var value: u64 = @intCast(self.lhs);
+            value <<= 32;
+            value |= @intCast(self.rhs);
+            return value;
+        }
     };
 
     pub const List = std.MultiArrayList(Node);
@@ -434,12 +441,9 @@ const PrettyPrinter = struct {
 
     fn printInt(self: *PrettyPrinter, idx: usize, last: bool) !void {
         const data = self.data[idx];
-        var value: u64 = @intCast(data.lhs);
-        value <<= 32;
-        value |= @intCast(data.rhs);
 
         try self.printIndentation(last);
-        try self.writer.print("int: {d}\n", .{value});
+        try self.writer.print("int: {d}\n", .{data.decodeInt()});
     }
 
     fn printFloat(self: *PrettyPrinter, idx: usize, last: bool) !void {

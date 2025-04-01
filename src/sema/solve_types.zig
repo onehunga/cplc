@@ -6,7 +6,19 @@ const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
 
-pub const TypeContext = struct {};
+pub const TypeContext = struct {
+    types: []Type.Id,
+
+    pub fn allocate(alloc: std.mem.Allocator, size: usize) !TypeContext {
+        return .{
+            .types = try alloc.alloc(Type.Id, size),
+        };
+    }
+
+    pub fn free(self: TypeContext, alloc: std.mem.Allocator) void {
+        alloc.free(self.types);
+    }
+};
 
 const BUILTIN_TYPES = std.StaticStringMap(Type.Id).initComptime(.{
     .{ "void", Type.builtin.VOID },
@@ -31,6 +43,11 @@ table: *Table,
 
 current_scope: Table.Scope.Id = 0,
 
+context: TypeContext,
+
+/// the current resolved type
+current_type: Type.Id = Type.builtin.UNKNOWN,
+
 pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !void {
     var self: Self = .{
         .alloc = alloc,
@@ -38,6 +55,7 @@ pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !v
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
         .table = table,
+        .context = undefined,
     };
 
     for (table.symbols) |sym| {
@@ -88,6 +106,181 @@ fn collectStructType(self: *Self, idx: usize) !void {
         },
     };
     type_interner.setType(self.table.lookupSymbol(self.current_scope, name).?.data.@"struct".ty, ty);
+}
+
+pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table) !TypeContext {
+    var self: Self = .{
+        .alloc = alloc,
+        .ast = ast,
+        .tags = ast.nodes.items(.tag),
+        .data = ast.nodes.items(.data),
+        .table = table,
+        .context = try TypeContext.allocate(alloc, ast.nodes.len),
+    };
+
+    try self.solveNodeType(0);
+
+    return self.context;
+}
+
+fn solveNodeType(self: *Self, node_ptr: usize) error{OutOfMemory}!void {
+    switch (self.tags[node_ptr]) {
+        .root => {
+            const data = self.data[node_ptr];
+            for (data.lhs..data.rhs) |child_ptr| {
+                try self.solveNodeType(child_ptr);
+            }
+        },
+        .struct_decl => {
+            const data = self.data[node_ptr];
+
+            for (data.lhs + 1..data.rhs) |child_ptr| {
+                try self.solveNodeType(child_ptr);
+            }
+        },
+        .func_decl => {
+            const data = self.data[node_ptr];
+
+            for (data.lhs + 2..data.rhs) |child_ptr| {
+                try self.solveNodeType(child_ptr);
+            }
+        },
+        .var_decl, .typed_var_decl => try self.solveVariableNodeType(node_ptr),
+        .int => self.solveIntNodeType(node_ptr),
+        .float => self.solveFloatNodeType(node_ptr),
+        .tuple_literal => try self.solveTupleLiteralNodeType(node_ptr),
+        .array_literal => try self.solveArrayLiteralNodeType(node_ptr),
+        .add, .sub, .mul, .div, .equal, .not_equal => try self.solveBinaryNodeType(node_ptr),
+        .member => try self.solveMemberNodeType(node_ptr),
+        .field_decl => {},
+        else => {},
+    }
+}
+
+fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    if (self.tags[node_ptr] == .typed_var_decl) {
+        const ty = self.solveType(data.lhs + 1).?;
+        self.context.types[node_ptr] = ty;
+    }
+
+    try self.solveNodeType(data.rhs - 1);
+
+    if (self.tags[node_ptr] == .typed_var_decl) {
+        if (self.context.types[node_ptr].id != self.current_type.id) {
+            std.debug.print("Type mismatch\n", .{});
+        }
+    }
+
+    self.context.types[node_ptr] = self.current_type;
+}
+
+fn solveIntNodeType(self: *Self, node_ptr: usize) void {
+    self.context.types[node_ptr] = Type.builtin.U32;
+    self.current_type = Type.builtin.U32;
+}
+
+fn solveFloatNodeType(self: *Self, node_ptr: usize) void {
+    self.context.types[node_ptr] = Type.builtin.F32;
+    self.current_type = Type.builtin.F32;
+}
+
+fn solveTupleLiteralNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    var types: std.ArrayListUnmanaged(Type.Id) = .empty;
+    errdefer types.deinit(self.alloc);
+
+    for (data.lhs..data.rhs) |child_ptr| {
+        try self.solveNodeType(child_ptr);
+        try types.append(self.alloc, self.current_type);
+    }
+
+    self.current_type = try type_interner.getOrPut(.{
+        .tag = .tuple,
+        .data = .{
+            .tuple = .{
+                .fields = try types.toOwnedSlice(self.alloc),
+            },
+        },
+    });
+}
+
+fn solveArrayLiteralNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    var ty: Type.Id = undefined;
+    for (data.lhs..data.rhs, 0..) |child_ptr, idx| {
+        try self.solveNodeType(child_ptr);
+
+        if (idx == 0) {
+            ty = self.current_type;
+        } else {
+            if (ty.id != self.current_type.id) {
+                std.debug.print("Type mismatch\n", .{});
+            }
+        }
+    }
+
+    self.current_type = try type_interner.getOrPut(.{
+        .tag = .slice,
+        .data = .{
+            .slice = .{
+                .element = ty,
+            },
+        },
+    });
+}
+
+fn solveBinaryNodeType(self: *Self, node_ptr: usize) !void {
+    const tag = self.tags[node_ptr];
+    const data = self.data[node_ptr];
+
+    try self.solveNodeType(data.lhs);
+    const lhs = self.current_type;
+
+    try self.solveNodeType(data.rhs);
+    const rhs = self.current_type;
+
+    if (lhs.id != rhs.id) {
+        std.debug.print("Type mismatch\n", .{});
+    }
+
+    switch (tag) {
+        .add, .sub, .mul, .div => {
+            self.current_type = lhs;
+        },
+        .equal, .not_equal => {
+            self.current_type = Type.builtin.BOOL;
+        },
+        else => unreachable,
+    }
+}
+
+fn solveMemberNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    try self.solveNodeType(data.lhs);
+    const lhs = self.current_type;
+    const sym = type_interner.getSymbol(lhs) orelse {
+        std.debug.print("Type not found\n", .{});
+        return;
+    };
+
+    switch (self.tags[data.rhs]) {
+        .int => try self.accessTupleMember(sym, data.rhs),
+        else => {},
+    }
+}
+
+fn accessTupleMember(self: *Self, sym: Type, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    const idx: usize = @intCast(data.decodeInt());
+    const member = sym.data.tuple.fields[idx];
+
+    self.current_type = member;
 }
 
 fn solveType(self: *Self, node_ptr: usize) ?Type.Id {

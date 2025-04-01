@@ -27,6 +27,8 @@ pub fn main() !void {
 
     // printSymbols(&table, 0);
     try solve_types.collectTypes(&ast, gpa.allocator(), &table);
+    var ctx = try solve_types.solveTypes(gpa.allocator(), &ast, &table);
+    defer ctx.free(gpa.allocator());
 
     // try ast.dump(std.io.getStdOut().writer());
     // try ast.prettyPrint(std.io.getStdOut().writer());
