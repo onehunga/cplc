@@ -20,6 +20,14 @@ pub const TypeContext = struct {
     }
 };
 
+const CodeSymbol = struct {
+    name: []const u8,
+    is_type: bool,
+    ty: Type.Id,
+
+    scope: Table.Scope.Id,
+};
+
 const BUILTIN_TYPES = std.StaticStringMap(Type.Id).initComptime(.{
     .{ "void", Type.builtin.VOID },
     .{ "bool", Type.builtin.BOOL },
@@ -47,6 +55,9 @@ context: TypeContext,
 
 /// the current resolved type
 current_type: Type.Id = Type.builtin.UNKNOWN,
+expected_type: Type.Id = Type.builtin.UNKNOWN,
+
+symbols: std.ArrayListUnmanaged(CodeSymbol) = .empty,
 
 pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !void {
     var self: Self = .{
@@ -117,6 +128,8 @@ pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table) !Typ
         .table = table,
         .context = try TypeContext.allocate(alloc, ast.nodes.len),
     };
+    defer self.symbols.deinit(alloc);
+    errdefer self.context.free(alloc);
 
     try self.solveNodeType(0);
 
@@ -134,35 +147,68 @@ fn solveNodeType(self: *Self, node_ptr: usize) error{OutOfMemory}!void {
         .struct_decl => {
             const data = self.data[node_ptr];
 
+            const scope = self.current_scope;
+            defer self.popScope(scope);
+
+            self.current_scope = self.table.lookupSymbol(scope, self.ast.literals.items[self.data[data.lhs].lhs]).?.data.@"struct".body;
+
             for (data.lhs + 1..data.rhs) |child_ptr| {
                 try self.solveNodeType(child_ptr);
             }
         },
-        .func_decl => {
-            const data = self.data[node_ptr];
-
-            for (data.lhs + 2..data.rhs) |child_ptr| {
-                try self.solveNodeType(child_ptr);
-            }
-        },
+        .func_decl => try self.solveFunctionNodeType(node_ptr),
         .var_decl, .typed_var_decl => try self.solveVariableNodeType(node_ptr),
+        .@"return" => try self.solveReturnNodeType(node_ptr),
+        .undefined => self.solveUndefinedNodeType(node_ptr),
         .int => self.solveIntNodeType(node_ptr),
         .float => self.solveFloatNodeType(node_ptr),
+        .ident => self.solveIdentNodeType(node_ptr),
         .tuple_literal => try self.solveTupleLiteralNodeType(node_ptr),
         .array_literal => try self.solveArrayLiteralNodeType(node_ptr),
         .add, .sub, .mul, .div, .equal, .not_equal => try self.solveBinaryNodeType(node_ptr),
         .member => try self.solveMemberNodeType(node_ptr),
-        .field_decl => {},
+        .field_decl, .func_proto, .func_param => {},
         else => {},
+    }
+}
+
+fn solveFunctionNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+    const sym = self.table.lookupSymbol(self.current_scope, self.ast.literals.items[self.data[data.lhs].lhs]).?;
+
+    const scope = self.current_scope;
+    defer self.popScope(scope);
+    self.current_scope = sym.data.func.args;
+
+    const proto = self.data[data.lhs + 1];
+
+    for (proto.lhs + 1..proto.rhs) |child_ptr| {
+        const arg = self.data[child_ptr];
+
+        const name = self.ast.literals.items[self.data[arg.lhs].lhs];
+        const ty = self.solveType(arg.rhs).?;
+
+        try self.addSymbol(name, false, ty);
+    }
+
+    self.current_scope = sym.data.func.body;
+
+    for (data.lhs + 2..data.rhs) |child_ptr| {
+        try self.solveNodeType(child_ptr);
     }
 }
 
 fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
     const data = self.data[node_ptr];
+    const name = self.ast.literals.items[self.data[data.lhs].lhs];
 
     if (self.tags[node_ptr] == .typed_var_decl) {
         const ty = self.solveType(data.lhs + 1).?;
         self.context.types[node_ptr] = ty;
+
+        self.expected_type = ty;
+    } else {
+        self.expected_type = Type.builtin.UNKNOWN;
     }
 
     try self.solveNodeType(data.rhs - 1);
@@ -174,6 +220,24 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
     }
 
     self.context.types[node_ptr] = self.current_type;
+
+    try self.addSymbol(name, false, self.current_type);
+
+    self.expected_type = Type.builtin.UNKNOWN;
+    self.current_type = Type.builtin.UNKNOWN;
+}
+
+fn solveReturnNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    if (data.lhs != 0) {
+        try self.solveNodeType(data.lhs);
+    }
+}
+
+fn solveUndefinedNodeType(self: *Self, node_ptr: usize) void {
+    self.context.types[node_ptr] = self.expected_type;
+    self.current_type = self.expected_type;
 }
 
 fn solveIntNodeType(self: *Self, node_ptr: usize) void {
@@ -184,6 +248,18 @@ fn solveIntNodeType(self: *Self, node_ptr: usize) void {
 fn solveFloatNodeType(self: *Self, node_ptr: usize) void {
     self.context.types[node_ptr] = Type.builtin.F32;
     self.current_type = Type.builtin.F32;
+}
+
+fn solveIdentNodeType(self: *Self, node_ptr: usize) void {
+    const data = self.data[node_ptr];
+    const name = self.ast.literals.items[data.lhs];
+
+    const sym = self.lookupSymbol(name) orelse {
+        std.log.debug("Symbol {s} not found\n", .{name});
+        return;
+    };
+
+    self.current_type = sym.ty;
 }
 
 fn solveTupleLiteralNodeType(self: *Self, node_ptr: usize) !void {
@@ -270,6 +346,7 @@ fn solveMemberNodeType(self: *Self, node_ptr: usize) !void {
 
     switch (self.tags[data.rhs]) {
         .int => try self.accessTupleMember(sym, data.rhs),
+        .ident => try self.accessNamedMember(sym, data.rhs),
         else => {},
     }
 }
@@ -281,6 +358,24 @@ fn accessTupleMember(self: *Self, sym: Type, node_ptr: usize) !void {
     const member = sym.data.tuple.fields[idx];
 
     self.current_type = member;
+}
+
+fn accessNamedMember(self: *Self, sym: Type, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    const name = self.ast.literals.items[data.lhs];
+    var field: ?Type.StructField = null;
+    for (sym.data.@"struct".fields) |f| {
+        if (std.mem.eql(u8, f.name, name)) {
+            field = f;
+        }
+    }
+
+    if (field) |f| {
+        self.current_type = f.ty;
+    } else {
+        std.debug.print("Field {s} not found\n", .{name});
+    }
 }
 
 fn solveType(self: *Self, node_ptr: usize) ?Type.Id {
@@ -345,4 +440,40 @@ fn solveBuiltinType(self: *Self, node_ptr: usize) ?Type.Id {
         },
         else => Type.builtin.UNKNOWN,
     };
+}
+
+fn popScope(self: *Self, scope: u32) void {
+    self.current_scope = scope;
+
+    var i = self.symbols.items.len;
+    while (i > 0) : (i -= 1) {
+        if (self.symbols.items[i - 1].scope == scope) {
+            break;
+        }
+
+        self.symbols.items.len -= 1;
+    }
+}
+
+fn addSymbol(self: *Self, name: []const u8, is_type: bool, ty: Type.Id) !void {
+    const sym: CodeSymbol = .{
+        .name = name,
+        .is_type = is_type,
+        .ty = ty,
+        .scope = self.current_scope,
+    };
+
+    try self.symbols.append(self.alloc, sym);
+}
+
+fn lookupSymbol(self: *Self, name: []const u8) ?CodeSymbol {
+    var i = self.symbols.items.len;
+    while (i > 0) : (i -= 1) {
+        const sym = self.symbols.items[i - 1];
+
+        if (std.mem.eql(u8, sym.name, name)) {
+            return sym;
+        }
+    }
+    return null;
 }
