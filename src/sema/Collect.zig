@@ -9,22 +9,21 @@ alloc: std.mem.Allocator,
 ast: *const Ast,
 tags: []Node.Tag,
 data: []Node.Data,
-symbols: std.ArrayListUnmanaged(Table.Symbol) = .empty,
-scopes: std.ArrayListUnmanaged(Table.Scope) = .empty,
-scratch: std.ArrayListUnmanaged(Table.Symbol) = .empty,
+table: *Table,
+scratch: std.ArrayListUnmanaged(Table.Symbol),
 
 current_scope: Table.Scope.Id = 0,
 
-pub fn collect(ast: *const Ast, alloc: std.mem.Allocator) Table {
+pub fn collect(ast: *const Ast, alloc: std.mem.Allocator, table: *Table, root_scope: *std.ArrayListUnmanaged(Table.Symbol)) !void {
     var self = Self{
         .alloc = alloc,
         .ast = ast,
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
+        .table = table,
+        .scratch = .empty,
     };
     defer self.scratch.deinit(alloc);
-
-    self.scopes.append(alloc, undefined) catch unreachable;
 
     const root = self.data[0];
 
@@ -32,15 +31,9 @@ pub fn collect(ast: *const Ast, alloc: std.mem.Allocator) Table {
         self.collectNode(tag, idx);
     }
 
-    const root_scope = self.addFromScratch(0);
-    self.scopes.items[0] = .{
-        .parent = null,
-        .symbols = root_scope,
-    };
-    return .init(
-        self.symbols.toOwnedSlice(alloc) catch unreachable,
-        self.scopes.toOwnedSlice(alloc) catch unreachable,
-    );
+    table.symbols = self.table.symbols;
+    table.scopes = self.table.scopes;
+    try root_scope.appendSlice(alloc, self.scratch.items);
 }
 
 fn collectNode(self: *Self, tag: Node.Tag, idx: usize) void {
@@ -170,20 +163,20 @@ fn addToScratch(self: *Self, symbol: Table.Symbol) void {
 }
 
 fn addFromScratch(self: *Self, start: usize) Table.Symbols {
-    const first = self.symbols.items.len;
+    const first = self.table.symbols.items.len;
 
     for (self.scratch.items[start..]) |symbol| {
-        self.symbols.append(self.alloc, symbol) catch unreachable;
+        self.table.symbols.append(self.alloc, symbol) catch unreachable;
     }
     self.scratch.resize(self.alloc, start) catch unreachable;
 
     return .{
         .start = @truncate(first),
-        .len = @truncate(self.symbols.items.len - first),
+        .len = @truncate(self.table.symbols.items.len - first),
     };
 }
 
 fn addScope(self: *Self, scope: Table.Scope) Table.Scope.Id {
-    self.scopes.append(self.alloc, scope) catch unreachable;
-    return @truncate(self.scopes.items.len - 1);
+    self.table.scopes.append(self.alloc, scope) catch unreachable;
+    return @truncate(self.table.scopes.items.len - 1);
 }

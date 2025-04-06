@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("Parser.zig");
+const Table = @import("ast/Table.zig");
 const Lexer = @import("Lexer.zig");
 const Collect = @import("sema/Collect.zig");
 const Module = @import("ast/Module.zig");
@@ -45,7 +46,7 @@ pub fn addModule(path: []const u8) !void {
 
     const ref: u32 = @truncate(modules.items.len);
     const module = try gpa.create(Module);
-    module.* = .init(path);
+    module.* = try .init(gpa, path);
     try modules.append(gpa, module);
     try module_refs.put(gpa, path, ref);
 }
@@ -56,6 +57,9 @@ fn parseModule(module: *Module) !void {
     defer dir.close();
 
     var it = dir.iterate();
+
+    var root: std.ArrayListUnmanaged(Table.Symbol) = .empty;
+    defer root.deinit(gpa);
     while (try it.next()) |file| {
         if (file.kind != .file) continue;
         std.log.debug("parsing file: {s}", .{file.name});
@@ -65,8 +69,47 @@ fn parseModule(module: *Module) !void {
         defer toks.deinit(gpa);
         const ast = try Parser.parse(gpa, toks, source);
 
-        const table = Collect.collect(&ast, gpa);
+        try Collect.collect(&ast, gpa, &module.table, &root);
 
-        try module.addFile(gpa, source, ast, table);
+        try module.addFile(gpa, source, ast);
+    }
+    // add  the root scope
+    {
+        const len = root.items.len;
+        const first = module.table.symbols.items.len;
+        try module.table.symbols.appendSlice(gpa, root.items);
+
+        module.table.scopes.items[0] = .{
+            .parent = null,
+            .symbols = .{
+                .start = @truncate(first),
+                .len = @truncate(len),
+            },
+        };
+    }
+
+    printSymbols(&module.table, 0);
+}
+
+fn printSymbols(table: *const Table, scope: Table.Scope.Id) void {
+    const symbols = table.getSymbols(table.scopes.items[scope].symbols);
+
+    for (symbols) |sym| {
+        printSymbol(table, sym);
+    }
+}
+
+fn printSymbol(table: *const Table, symbol: Table.Symbol) void {
+    std.debug.print("{s}: {}\n", .{ symbol.name, symbol.tag });
+
+    switch (symbol.tag) {
+        .@"struct" => {
+            printSymbols(table, symbol.data.@"struct".body);
+        },
+        .func => {
+            printSymbols(table, symbol.data.func.args);
+            printSymbols(table, symbol.data.func.body);
+        },
+        .field, .@"var" => {},
     }
 }

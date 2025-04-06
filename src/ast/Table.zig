@@ -2,23 +2,26 @@ const Self = @This();
 const std = @import("std");
 const Type = @import("Type.zig");
 
-symbols: []const Symbol,
-scopes: []const Scope,
+symbols: std.ArrayListUnmanaged(Symbol),
+scopes: std.ArrayListUnmanaged(Scope),
 
-pub fn init(symbols: []const Symbol, scopes: []const Scope) Self {
-    return .{
-        .symbols = symbols,
-        .scopes = scopes,
+pub fn init(gpa: std.mem.Allocator) !Self {
+    var self: Self = .{
+        .symbols = .empty,
+        .scopes = .empty,
     };
+    try self.scopes.append(gpa, undefined);
+
+    return self;
 }
 
 pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-    alloc.free(self.symbols);
-    alloc.free(self.scopes);
+    self.symbols.deinit(alloc);
+    self.scopes.deinit(alloc);
 }
 
 pub fn getSymbols(self: *const Self, symbols: Symbols) []const Symbol {
-    return self.symbols[symbols.start..][0..symbols.len];
+    return self.symbols.items[symbols.start..][0..symbols.len];
 }
 
 pub fn lookupSymbol(self: *const Self, scope: Scope.Id, name: []const u8) ?Symbol {
