@@ -54,6 +54,24 @@ pub fn dump(self: *const Self, writer: std.fs.File.Writer) !void {
     }
 }
 
+pub fn collectImports(self: *const Self, gpa: std.mem.Allocator) !std.ArrayListUnmanaged(u32) {
+    const root = self.nodes.items(.data)[0];
+    const tags = self.nodes.items(.tag)[root.lhs..root.rhs];
+
+    var imports: std.ArrayListUnmanaged(u32) = .empty;
+
+    for (tags, 0..) |tag, idx| {
+        switch (tag) {
+            .import_relative_module => {
+                try imports.append(gpa, @truncate(idx + root.lhs));
+            },
+            else => continue,
+        }
+    }
+
+    return imports;
+}
+
 pub const Node = struct {
     tag: Tag,
     data: Data,
@@ -64,6 +82,11 @@ pub const Node = struct {
         ///
         /// nodes[lhs..rhs]
         root,
+
+        /// import a module relative to the current module
+        ///
+        /// nodes[lhs] = name
+        import_relative_module,
 
         /// struct definition
         ///

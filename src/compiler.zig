@@ -1,10 +1,13 @@
 const std = @import("std");
+const Ast = @import("Ast.zig");
 const Parser = @import("Parser.zig");
 const Table = @import("ast/Table.zig");
 const Lexer = @import("Lexer.zig");
 const Collect = @import("sema/Collect.zig");
 const Module = @import("ast/Module.zig");
 const type_interner = @import("ast/type_interner.zig");
+
+pub const CompileError = std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File.SeekError || std.fs.File.ReadError || Parser.ParseError;
 
 var gpa: std.mem.Allocator = undefined;
 var modules: std.ArrayListUnmanaged(*Module) = .empty;
@@ -33,12 +36,6 @@ pub fn deinit() void {
     module_refs.deinit(gpa);
 }
 
-pub fn compileAll() !void {
-    for (modules.items) |module| {
-        try parseModule(module);
-    }
-}
-
 pub fn addModule(path: []const u8) !void {
     if (module_refs.contains(path)) {
         return;
@@ -49,6 +46,8 @@ pub fn addModule(path: []const u8) !void {
     module.* = try .init(gpa, path);
     try modules.append(gpa, module);
     try module_refs.put(gpa, path, ref);
+
+    try parseModule(module);
 }
 
 fn parseModule(module: *Module) !void {
@@ -61,13 +60,17 @@ fn parseModule(module: *Module) !void {
     var root: std.ArrayListUnmanaged(Table.Symbol) = .empty;
     defer root.deinit(gpa);
     while (try it.next()) |file| {
-        if (file.kind != .file) continue;
+        if (file.kind != .file) {
+            continue;
+        }
         std.log.debug("parsing file: {s}", .{file.name});
 
         const source = try dir.readFileAlloc(gpa, file.name, 30_000);
         var toks = try Lexer.lex(source, gpa);
         defer toks.deinit(gpa);
         const ast = try Parser.parse(gpa, toks, source);
+
+        try handleImports(module, &ast);
 
         try Collect.collect(&ast, gpa, &module.table, &root);
 
@@ -87,6 +90,8 @@ fn parseModule(module: *Module) !void {
             },
         };
     }
+
+    {}
 
     printSymbols(&module.table, 0);
 }
@@ -111,5 +116,26 @@ fn printSymbol(table: *const Table, symbol: Table.Symbol) void {
             printSymbols(table, symbol.data.func.body);
         },
         .field, .@"var" => {},
+    }
+}
+
+fn handleImports(module: *const Module, ast: *const Ast) CompileError!void {
+    var imports = try ast.collectImports(gpa);
+    defer imports.deinit(gpa);
+
+    if (imports.items.len == 0) {
+        return;
+    }
+
+    const data = ast.nodes.items(.data);
+    for (imports.items) |import| {
+        const relative_path = ast.literals.items[data[import].lhs];
+
+        const absolute_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{
+            module.path,
+            relative_path,
+        });
+
+        try addModule(absolute_path);
     }
 }

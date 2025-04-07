@@ -6,6 +6,7 @@ const mem = std.mem;
 pub const TokenList = std.MultiArrayList(Token);
 
 const KEYWORDS = std.StaticStringMap(Token.Tag).initComptime(.{
+    .{ "import", .import },
     .{ "struct", .@"struct" },
     .{ "func", .func },
     .{ "var", .@"var" },
@@ -218,6 +219,7 @@ pub const Token = struct {
         int,
         float,
         ident,
+        import,
         @"struct",
         func,
         @"var",

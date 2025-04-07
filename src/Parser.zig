@@ -19,7 +19,7 @@ const ParserState = enum {
     struct_body,
 };
 
-const ParseError = error{
+pub const ParseError = error{
     ParseError,
 
     UnknownStatement,
@@ -77,6 +77,7 @@ fn parseStmt(self: *Self) ParseError!void {
     defer self.restoreState(state);
 
     return switch (self.currentToken()) {
+        .import => self.parseImport(),
         .comment => self.parseComment(),
         .@"struct" => self.parseStruct(),
         .func => self.parseFunction(),
@@ -87,6 +88,23 @@ fn parseStmt(self: *Self) ParseError!void {
             .struct_body => self.parseFieldDecl(),
         },
     };
+}
+
+fn parseImport(self: *Self) !void {
+    const start_loc = self.locs[self.current];
+
+    self.advance();
+
+    const name = try self.takeToken(.ident, "expected a module name", .{});
+    const lit = self.source[name.start..name.end];
+    const ref = try self.addLiteral(lit);
+
+    const node: Ast.Node = .{
+        .tag = .import_relative_module,
+        .data = .{ .lhs = ref },
+        .loc = start_loc,
+    };
+    try self.addScratch(node);
 }
 
 fn parseComment(self: *Self) void {

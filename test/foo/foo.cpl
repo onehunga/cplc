@@ -1,0 +1,6 @@
+struct Foo {
+	bar (u32, u32),
+	baz [u32],
+
+	func new() Foo {}
+}

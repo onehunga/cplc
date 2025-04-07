@@ -16,8 +16,6 @@ pub fn main() !void {
     {
         const test_root_dir = try std.fs.cwd().realpathAlloc(gpa.allocator(), "test");
         try compiler.addModule(test_root_dir);
-
-        try compiler.compileAll();
     }
 
     // try solve_types.collectTypes(&ast, gpa.allocator(), &table);
