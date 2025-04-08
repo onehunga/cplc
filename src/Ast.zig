@@ -22,7 +22,7 @@ pub fn deinit(self: *Self, allocator: mem.Allocator) void {
     self.literals.deinit(allocator);
 }
 
-pub fn prettyPrint(self: *Self, writer: std.fs.File.Writer) !void {
+pub fn prettyPrint(self: *const Self, writer: std.fs.File.Writer) !void {
     var printer = PrettyPrinter.init(self, writer);
     return printer.print();
 }
@@ -662,6 +662,19 @@ const PrettyPrinter = struct {
                     defer self.popIndent();
 
                     try self.printType(data.lhs, true);
+                }
+            },
+            .member => {
+                const data = self.data[idx];
+                try self.printIndentation(last);
+                try self.writer.writeAll("member\n");
+
+                {
+                    self.pushIndent(true);
+                    defer self.popIndent();
+
+                    try self.printType(data.lhs, false);
+                    try self.printType(data.rhs, true);
                 }
             },
             else => {},

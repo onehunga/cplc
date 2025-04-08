@@ -5,9 +5,9 @@ func main() bool {
 	var a u32 = 0;
 	var b [u32] = [1, 2];
 	var c (u32, u32, [u32]) = (1, 2, [1, 2, 3]);
-	var foo Foo = undefined;
+	var fo foo.Foo = undefined;
 	var d u32 = c.1;
-	var x (u32, u32) = foo.bar;
+	var x (u32, u32) = fo.bar;
 	if true {
 		return 4.20 == 6.9;
 	};
@@ -20,6 +20,6 @@ func main() bool {
 	return 1 + 2 * 3;
 }
 
-func foo(foo u32, bar u32,) void {
+func add(foo u32, bar u32,) void {
 	return foo + bar;
 }

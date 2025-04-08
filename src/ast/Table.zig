@@ -25,7 +25,7 @@ pub fn getSymbols(self: *const Self, symbols: Symbols) []const Symbol {
 }
 
 pub fn lookupSymbol(self: *const Self, scope: Scope.Id, name: []const u8) ?Symbol {
-    const symbols = self.getSymbols(self.scopes[scope].symbols);
+    const symbols = self.getSymbols(self.scopes.items[scope].symbols);
 
     for (symbols) |symbol| {
         if (std.mem.eql(u8, symbol.name, name)) {
@@ -33,7 +33,7 @@ pub fn lookupSymbol(self: *const Self, scope: Scope.Id, name: []const u8) ?Symbo
         }
     }
 
-    if (self.scopes[scope].parent) |parent| {
+    if (self.scopes.items[scope].parent) |parent| {
         return self.lookupSymbol(parent, name);
     }
 
@@ -64,6 +64,7 @@ pub const Symbol = struct {
     ref: u32, // ast index
 
     pub const Tag = enum {
+        import,
         @"struct",
         func,
         field,
@@ -72,6 +73,7 @@ pub const Symbol = struct {
 
     pub const Data = union {
         none: void,
+        import: ImportData,
         @"struct": StructData,
         func: FunctionData,
 
@@ -79,6 +81,10 @@ pub const Symbol = struct {
             .none = void{},
         };
     };
+};
+
+pub const ImportData = struct {
+    module: u32,
 };
 
 pub const StructData = struct {

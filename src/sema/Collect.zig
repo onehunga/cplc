@@ -4,6 +4,7 @@ const Ast = @import("../Ast.zig");
 const Node = Ast.Node;
 const Table = @import("../ast/Table.zig");
 const type_interner = @import("../ast/type_interner.zig");
+const compiler = @import("../compiler.zig");
 
 alloc: std.mem.Allocator,
 ast: *const Ast,
@@ -11,10 +12,11 @@ tags: []Node.Tag,
 data: []Node.Data,
 table: *Table,
 scratch: std.ArrayListUnmanaged(Table.Symbol),
+module_ref: u32,
 
 current_scope: Table.Scope.Id = 0,
 
-pub fn collect(ast: *const Ast, alloc: std.mem.Allocator, table: *Table, root_scope: *std.ArrayListUnmanaged(Table.Symbol)) !void {
+pub fn collect(ast: *const Ast, module_ref: u32, alloc: std.mem.Allocator, table: *Table, root_scope: *std.ArrayListUnmanaged(Table.Symbol)) !void {
     var self = Self{
         .alloc = alloc,
         .ast = ast,
@@ -22,6 +24,7 @@ pub fn collect(ast: *const Ast, alloc: std.mem.Allocator, table: *Table, root_sc
         .data = ast.nodes.items(.data),
         .table = table,
         .scratch = .empty,
+        .module_ref = module_ref,
     };
     defer self.scratch.deinit(alloc);
 
@@ -39,6 +42,7 @@ pub fn collect(ast: *const Ast, alloc: std.mem.Allocator, table: *Table, root_sc
 fn collectNode(self: *Self, tag: Node.Tag, idx: usize) void {
     switch (tag) {
         .root => unreachable,
+        .import_relative_module => self.collectImport(idx),
         .struct_decl => self.collectStruct(idx),
         .field_decl => self.collectField(idx),
         .func_decl => self.collectFunction(idx),
@@ -46,6 +50,25 @@ fn collectNode(self: *Self, tag: Node.Tag, idx: usize) void {
         .var_decl, .typed_var_decl => self.collectVariable(idx),
         else => {},
     }
+}
+
+fn collectImport(self: *Self, idx: usize) void {
+    const name = self.ast.literals.items[self.data[idx].lhs];
+
+    const mod = compiler.getModuleRelative(self.module_ref, name) catch unreachable;
+
+    const sym: Table.Symbol = .{
+        .tag = .import,
+        .name = name,
+        .data = .{
+            .import = .{
+                .module = mod,
+            },
+        },
+        .ref = @truncate(idx),
+    };
+
+    self.scratch.append(self.alloc, sym) catch unreachable;
 }
 
 fn collectStruct(self: *Self, idx: usize) void {

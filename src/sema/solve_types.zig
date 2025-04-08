@@ -5,6 +5,7 @@ const Node = Ast.Node;
 const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
+const compiler = @import("../compiler.zig");
 
 pub const TypeContext = struct {
     types: []Type.Id,
@@ -69,7 +70,7 @@ pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !v
         .context = undefined,
     };
 
-    for (table.symbols) |sym| {
+    for (table.symbols.items) |sym| {
         try self.collectType(&sym);
     }
 }
@@ -203,7 +204,9 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
     const name = self.ast.literals.items[self.data[data.lhs].lhs];
 
     if (self.tags[node_ptr] == .typed_var_decl) {
-        const ty = self.solveType(data.lhs + 1).?;
+        const ty = self.solveType(data.lhs + 1) orelse {
+            std.process.exit(1);
+        };
         self.context.types[node_ptr] = ty;
 
         self.expected_type = ty;
@@ -255,7 +258,6 @@ fn solveIdentNodeType(self: *Self, node_ptr: usize) void {
     const name = self.ast.literals.items[data.lhs];
 
     const sym = self.lookupSymbol(name) orelse {
-        std.log.debug("Symbol {s} not found\n", .{name});
         return;
     };
 
@@ -391,6 +393,16 @@ fn solveType(self: *Self, node_ptr: usize) ?Type.Id {
         },
         .tuple => self.solveTupleType(node_ptr),
         .slice => self.solveSliceType(node_ptr),
+        .member => {
+            const sym = self.solveSymbol(node_ptr) orelse return null;
+
+            switch (sym.tag) {
+                .@"struct" => {
+                    return sym.data.@"struct".ty;
+                },
+                else => unreachable,
+            }
+        },
         else => null,
     };
 }
@@ -440,6 +452,38 @@ fn solveBuiltinType(self: *Self, node_ptr: usize) ?Type.Id {
         },
         else => Type.builtin.UNKNOWN,
     };
+}
+
+fn solveSymbol(self: *Self, node_ptr: usize) ?Table.Symbol {
+    switch (self.tags[node_ptr]) {
+        .ident => {
+            const name = self.ast.literals.items[self.data[node_ptr].lhs];
+            const symbol = self.table.lookupSymbol(self.current_scope, name) orelse {
+                return null;
+            };
+
+            return symbol;
+        },
+        .member => {
+            const data = self.data[node_ptr];
+            const of = self.solveSymbol(data.lhs) orelse return null;
+            const what = self.ast.literals.items[self.data[data.rhs].lhs];
+
+            return switch (of.tag) {
+                .import => {
+                    const table = compiler.getSymbolTable(of.data.import.module);
+                    return table.lookupSymbol(0, what) orelse {
+                        return null;
+                    };
+                },
+                else => unreachable,
+            };
+        },
+        else => {
+            std.log.err("unknown symbol lookup", .{});
+            return null;
+        },
+    }
 }
 
 fn popScope(self: *Self, scope: u32) void {

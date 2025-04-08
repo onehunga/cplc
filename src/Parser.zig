@@ -739,17 +739,26 @@ fn parseArrayType(self: *Self) ParseError!Ast.Node {
 }
 
 fn parseNamedType(self: *Self) !Ast.Node {
-    const span = self.locs[self.current];
-    const lit = self.source[span.start..span.end];
-    const name = try self.addLiteral(lit);
+    var ty = try self.parseIdent();
 
-    return Ast.Node{
-        .tag = .ident,
-        .data = .{
-            .lhs = name,
-        },
-        .loc = self.locs[self.current],
-    };
+    if (self.peekToken() == .dot) {
+        self.advance();
+        const loc = self.locs[self.current];
+        self.advance();
+
+        const field = try self.parseIdent();
+        const tid = try self.addNode(ty);
+        ty = .{
+            .tag = .member,
+            .data = .{
+                .lhs = tid,
+                .rhs = try self.addNode(field),
+            },
+            .loc = loc,
+        };
+    }
+
+    return ty;
 }
 
 fn peekPrecedence(self: *const Self) Precedence {
