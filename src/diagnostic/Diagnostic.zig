@@ -10,20 +10,24 @@ const SourceLocation = struct {
 };
 
 writer: std.fs.File.Writer,
+filename: []const u8,
+source: []const u8,
 
-pub fn init(writer: std.fs.File.Writer) Self {
+pub fn init(writer: std.fs.File.Writer, source: []const u8) Self {
     return .{
         .writer = writer,
+        .filename = "file",
+        .source = source,
     };
 }
 
-pub fn report(self: *Self, comptime fmt: []const u8, args: anytype, source: []const u8, location: Lexer.Token.Location) void {
+pub fn report(self: *Self, comptime fmt: []const u8, args: anytype, location: Lexer.Token.Location) void {
     // TODO: implement a better interning for source files including names and paths
-    self.reportError(fmt, args, "file", source, location) catch unreachable;
+    self.reportError(fmt, args, location) catch unreachable;
 }
 
-fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, filename: []const u8, source: []const u8, location: Lexer.Token.Location) !void {
-    const loc = locationToSourceLocation(source, location);
+fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, location: Lexer.Token.Location) !void {
+    const loc = locationToSourceLocation(self.source, location);
 
     try self.writer.print("error: ", .{});
     try self.writer.print(fmt, args);
@@ -33,11 +37,11 @@ fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, filename: [
     if (loc.start > 0) {
         var i = loc.start - 1;
         while (i > 0) : (i -= 1) {
-            if (source[i] == '\n') {
+            if (self.source[i] == '\n') {
                 start_of_line = i + 1;
                 break;
             }
-            if (i == 0 and source[i] != '\n') {
+            if (i == 0 and self.source[i] != '\n') {
                 start_of_line = 0;
                 break;
             }
@@ -48,19 +52,19 @@ fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, filename: [
     }
 
     var end_of_line = loc.start;
-    while (end_of_line < source.len and source[end_of_line] != '\n') {
+    while (end_of_line < self.source.len and self.source[end_of_line] != '\n') {
         end_of_line += 1;
     }
 
     try self.writer.writeAll("\x1b[31m");
-    try self.writer.print("    --> {s}:{d}:{d}", .{ filename, loc.line, loc.column });
+    try self.writer.print("    --> {s}:{d}:{d}", .{ self.filename, loc.line, loc.column });
     try self.writer.writeAll("\x1b[0m\n");
     try self.writer.writeAll("     |\n");
 
     try self.writer.print("{d: >4} | ", .{loc.line});
 
     var visual_col: usize = 0;
-    for (source[start_of_line..end_of_line]) |char| {
+    for (self.source[start_of_line..end_of_line]) |char| {
         if (char == '\t') {
             const spaces_to_add = 4 - (visual_col % 4);
             for (0..spaces_to_add) |_| {
@@ -79,7 +83,7 @@ fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, filename: [
     var current_visual_column: usize = 0;
     var i: usize = start_of_line;
     while (i < loc.start) : (i += 1) {
-        const char = source[i];
+        const char = self.source[i];
         if (char == '\t') {
             const spaces_to_add = 4 - (current_visual_column % 4);
             for (0..spaces_to_add) |_| {

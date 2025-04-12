@@ -139,7 +139,7 @@ pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table, sour
         .table = table,
         .context = try TypeContext.allocate(alloc, ast.nodes.len),
         .source = source,
-        .diagnostic = Diagnostig.init(std.io.getStdOut().writer()),
+        .diagnostic = Diagnostig.init(std.io.getStdOut().writer(), source),
     };
     defer self.symbols.deinit(alloc);
     errdefer self.context.free(alloc);
@@ -230,7 +230,7 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
 
     if (self.tags[node_ptr] == .typed_var_decl) {
         if (self.context.types[node_ptr].id != self.current_type.id) {
-            self.diagnostic.report("types mismatch", .{}, self.source, self.locs[data.rhs - 1]);
+            self.diagnostic.report("types mismatch", .{}, self.locs[data.rhs - 1]);
             // std.debug.print("Type mismatch\n", .{});
         }
     }
