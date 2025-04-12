@@ -6,6 +6,7 @@ const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
 const compiler = @import("../compiler.zig");
+const Diagnostig = @import("../diagnostic/Diagnostic.zig");
 
 pub const TypeContext = struct {
     types: []Type.Id,
@@ -60,6 +61,9 @@ expected_type: Type.Id = Type.builtin.UNKNOWN,
 
 symbols: std.ArrayListUnmanaged(CodeSymbol) = .empty,
 
+source: []const u8,
+diagnostic: Diagnostig,
+
 pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !void {
     var self: Self = .{
         .alloc = alloc,
@@ -68,6 +72,8 @@ pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !v
         .data = ast.nodes.items(.data),
         .table = table,
         .context = undefined,
+        .source = undefined,
+        .diagnostic = undefined,
     };
 
     for (table.symbols.items) |sym| {
@@ -120,7 +126,7 @@ fn collectStructType(self: *Self, idx: usize) !void {
     type_interner.setType(self.table.lookupSymbol(self.current_scope, name).?.data.@"struct".ty, ty);
 }
 
-pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table) !TypeContext {
+pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table, source: []const u8) !TypeContext {
     var self: Self = .{
         .alloc = alloc,
         .ast = ast,
@@ -128,6 +134,8 @@ pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table) !Typ
         .data = ast.nodes.items(.data),
         .table = table,
         .context = try TypeContext.allocate(alloc, ast.nodes.len),
+        .source = source,
+        .diagnostic = Diagnostig.init(std.io.getStdOut().writer()),
     };
     defer self.symbols.deinit(alloc);
     errdefer self.context.free(alloc);
@@ -218,7 +226,8 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
 
     if (self.tags[node_ptr] == .typed_var_decl) {
         if (self.context.types[node_ptr].id != self.current_type.id) {
-            std.debug.print("Type mismatch\n", .{});
+            self.diagnostic.report("types mismatch", .{}, self.source, self.ast.nodes.get(node_ptr).loc);
+            // std.debug.print("Type mismatch\n", .{});
         }
     }
 
