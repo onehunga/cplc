@@ -18,18 +18,17 @@ pub fn init(writer: std.fs.File.Writer) Self {
 }
 
 pub fn report(self: *Self, comptime fmt: []const u8, args: anytype, source: []const u8, location: Lexer.Token.Location) void {
-    self.reportError(fmt, args, source, location) catch unreachable;
+    // TODO: implement a better interning for source files including names and paths
+    self.reportError(fmt, args, "file", source, location) catch unreachable;
 }
 
-fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, source: []const u8, location: Lexer.Token.Location) !void {
+fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, filename: []const u8, source: []const u8, location: Lexer.Token.Location) !void {
     const loc = locationToSourceLocation(source, location);
 
-    // Print the error message with formatting
     try self.writer.print("error: ", .{});
     try self.writer.print(fmt, args);
     try self.writer.print("\n", .{});
 
-    // Find the line containing the error
     var start_of_line: usize = 0;
     if (loc.start > 0) {
         var i = loc.start - 1;
@@ -38,31 +37,61 @@ fn reportError(self: *Self, comptime fmt: []const u8, args: anytype, source: []c
                 start_of_line = i + 1;
                 break;
             }
+            if (i == 0 and source[i] != '\n') {
+                start_of_line = 0;
+                break;
+            }
+        }
+        if (loc.start == 0) {
+            start_of_line = 0;
         }
     }
 
-    // Find the end of that line
     var end_of_line = loc.start;
     while (end_of_line < source.len and source[end_of_line] != '\n') {
         end_of_line += 1;
     }
 
-    // Print the location information
-    try self.writer.print(" --> line {d}:{d}\n", .{ loc.line, loc.column });
-    try self.writer.print("  |\n", .{});
+    try self.writer.writeAll("\x1b[31m");
+    try self.writer.print("    --> {s}:{d}:{d}", .{ filename, loc.line, loc.column });
+    try self.writer.writeAll("\x1b[0m\n");
+    try self.writer.writeAll("     |\n");
 
-    // Print the line number and the line content
-    try self.writer.print("{d: >4} | {s}\n", .{ loc.line, source[start_of_line..end_of_line] });
+    try self.writer.print("{d: >4} | ", .{loc.line});
 
-    // Print the caret pointer line
-    try self.writer.print("     | ", .{});
+    var visual_col: usize = 0;
+    for (source[start_of_line..end_of_line]) |char| {
+        if (char == '\t') {
+            const spaces_to_add = 4 - (visual_col % 4);
+            for (0..spaces_to_add) |_| {
+                try self.writer.writeByte(' ');
+            }
+            visual_col += spaces_to_add;
+        } else {
+            try self.writer.writeByte(char);
+            visual_col += 1;
+        }
+    }
+    try self.writer.writeByte('\n');
 
-    // Print spaces up to the error position
-    for (0..loc.column - 1) |_| {
-        try self.writer.print(" ", .{});
+    try self.writer.writeAll("     | ");
+
+    var current_visual_column: usize = 0;
+    var i: usize = start_of_line;
+    while (i < loc.start) : (i += 1) {
+        const char = source[i];
+        if (char == '\t') {
+            const spaces_to_add = 4 - (current_visual_column % 4);
+            for (0..spaces_to_add) |_| {
+                try self.writer.print(" ", .{});
+            }
+            current_visual_column += spaces_to_add;
+        } else {
+            try self.writer.print(" ", .{});
+            current_visual_column += 1;
+        }
     }
 
-    // Print carets for the length of the error
     const error_len = if (loc.end > loc.start) loc.end - loc.start else 1;
 
     try self.writer.print("^", .{});
@@ -85,6 +114,8 @@ fn locationToSourceLocation(source: []const u8, location: Lexer.Token.Location) 
         if (char == '\n') {
             line += 1;
             column = 1;
+        } else if (char == '\t') {
+            column += 4 - ((column - 1) % 4);
         } else {
             column += 1;
         }

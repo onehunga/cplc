@@ -2,6 +2,7 @@ const Self = @This();
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Node = Ast.Node;
+const Lexer = @import("../Lexer.zig");
 const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
@@ -49,6 +50,7 @@ alloc: std.mem.Allocator,
 ast: *const Ast,
 tags: []Node.Tag,
 data: []Node.Data,
+locs: []Lexer.Token.Location,
 table: *Table,
 
 current_scope: Table.Scope.Id = 0,
@@ -70,6 +72,7 @@ pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !v
         .ast = ast,
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
+        .locs = ast.nodes.items(.loc),
         .table = table,
         .context = undefined,
         .source = undefined,
@@ -132,6 +135,7 @@ pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table, sour
         .ast = ast,
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
+        .locs = ast.nodes.items(.loc),
         .table = table,
         .context = try TypeContext.allocate(alloc, ast.nodes.len),
         .source = source,
@@ -226,7 +230,7 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
 
     if (self.tags[node_ptr] == .typed_var_decl) {
         if (self.context.types[node_ptr].id != self.current_type.id) {
-            self.diagnostic.report("types mismatch", .{}, self.source, self.ast.nodes.get(node_ptr).loc);
+            self.diagnostic.report("types mismatch", .{}, self.source, self.locs[data.rhs - 1]);
             // std.debug.print("Type mismatch\n", .{});
         }
     }
