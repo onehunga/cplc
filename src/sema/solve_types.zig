@@ -2,10 +2,12 @@ const Self = @This();
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Node = Ast.Node;
+const Lexer = @import("../Lexer.zig");
 const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
 const compiler = @import("../compiler.zig");
+const Diagnostig = @import("../diagnostic/Diagnostic.zig");
 
 pub const TypeContext = struct {
     types: []Type.Id,
@@ -48,6 +50,7 @@ alloc: std.mem.Allocator,
 ast: *const Ast,
 tags: []Node.Tag,
 data: []Node.Data,
+locs: []Lexer.Token.Location,
 table: *Table,
 
 current_scope: Table.Scope.Id = 0,
@@ -60,14 +63,20 @@ expected_type: Type.Id = Type.builtin.UNKNOWN,
 
 symbols: std.ArrayListUnmanaged(CodeSymbol) = .empty,
 
+source: []const u8,
+diagnostic: Diagnostig,
+
 pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !void {
     var self: Self = .{
         .alloc = alloc,
         .ast = ast,
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
+        .locs = ast.nodes.items(.loc),
         .table = table,
         .context = undefined,
+        .source = undefined,
+        .diagnostic = undefined,
     };
 
     for (table.symbols.items) |sym| {
@@ -120,14 +129,17 @@ fn collectStructType(self: *Self, idx: usize) !void {
     type_interner.setType(self.table.lookupSymbol(self.current_scope, name).?.data.@"struct".ty, ty);
 }
 
-pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table) !TypeContext {
+pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table, source: []const u8) !TypeContext {
     var self: Self = .{
         .alloc = alloc,
         .ast = ast,
         .tags = ast.nodes.items(.tag),
         .data = ast.nodes.items(.data),
+        .locs = ast.nodes.items(.loc),
         .table = table,
         .context = try TypeContext.allocate(alloc, ast.nodes.len),
+        .source = source,
+        .diagnostic = Diagnostig.init(std.io.getStdOut().writer(), source),
     };
     defer self.symbols.deinit(alloc);
     errdefer self.context.free(alloc);
@@ -218,7 +230,8 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
 
     if (self.tags[node_ptr] == .typed_var_decl) {
         if (self.context.types[node_ptr].id != self.current_type.id) {
-            std.debug.print("Type mismatch\n", .{});
+            self.diagnostic.report("types mismatch", .{}, self.locs[data.rhs - 1]);
+            // std.debug.print("Type mismatch\n", .{});
         }
     }
 

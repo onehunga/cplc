@@ -60,7 +60,7 @@ pub fn collectAllModules() !void {
 
     for (modules.items) |module| {
         for (module.files.items) |file| {
-            var tc = try solve_types.solveTypes(gpa, &file.ast, &module.table);
+            var tc = try solve_types.solveTypes(gpa, &file.ast, &module.table, file.source);
             defer tc.free(gpa);
         }
     }
