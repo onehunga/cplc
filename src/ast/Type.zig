@@ -120,7 +120,7 @@ pub const builtin = struct {
     pub const S8: Id = .init(7);
     pub const S16: Id = .init(8);
     pub const S32: Id = .init(9);
-    pub const S64: Id = .init(6);
-    pub const F32: Id = .init(5);
-    pub const F64: Id = .init(6);
+    pub const S64: Id = .init(10);
+    pub const F32: Id = .init(11);
+    pub const F64: Id = .init(12);
 };
