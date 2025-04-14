@@ -190,6 +190,13 @@ pub const Token = struct {
     pub const Location = struct {
         start: u32,
         end: u32,
+
+        pub fn span(start: Location, end: Location) Location {
+            return Location{
+                .start = start.start,
+                .end = end.end,
+            };
+        }
     };
 
     pub const Tag = enum {

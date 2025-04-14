@@ -1,8 +1,13 @@
+//! solves the types of the AST nodes
+//!
+//! for now it will also do some type checking
+
 const Self = @This();
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Node = Ast.Node;
 const Lexer = @import("../Lexer.zig");
+const Location = Lexer.Token.Location;
 const Table = @import("../ast/Table.zig");
 const Type = @import("../ast/Type.zig");
 const type_interner = @import("../ast/type_interner.zig");
@@ -79,14 +84,15 @@ pub fn collectTypes(ast: *const Ast, alloc: std.mem.Allocator, table: *Table) !v
         .diagnostic = undefined,
     };
 
-    for (table.symbols.items) |sym| {
-        try self.collectType(&sym);
+    for (table.symbols.items) |*sym| {
+        try self.collectType(sym);
     }
 }
 
-fn collectType(self: *Self, sym: *const Table.Symbol) !void {
+fn collectType(self: *Self, sym: *Table.Symbol) !void {
     return switch (sym.tag) {
         .@"struct" => self.collectStructType(sym.ref),
+        .param => self.collectParamType(sym),
         else => {},
     };
 }
@@ -127,6 +133,13 @@ fn collectStructType(self: *Self, idx: usize) !void {
         },
     };
     type_interner.setType(self.table.lookupSymbol(self.current_scope, name).?.data.@"struct".ty, ty);
+}
+
+fn collectParamType(self: *Self, sym: *Table.Symbol) !void {
+    const data = self.data[sym.ref];
+
+    const ty = self.solveType(data.rhs).?;
+    sym.data.param.ty = ty;
 }
 
 pub fn solveTypes(alloc: std.mem.Allocator, ast: *const Ast, table: *Table, source: []const u8) !TypeContext {
@@ -175,13 +188,17 @@ fn solveNodeType(self: *Self, node_ptr: usize) error{OutOfMemory}!void {
         .undefined => self.solveUndefinedNodeType(node_ptr),
         .int => self.solveIntNodeType(node_ptr),
         .float => self.solveFloatNodeType(node_ptr),
+        .bool => self.solveBoolNodeType(node_ptr),
         .ident => self.solveIdentNodeType(node_ptr),
         .tuple_literal => try self.solveTupleLiteralNodeType(node_ptr),
         .array_literal => try self.solveArrayLiteralNodeType(node_ptr),
+        .scope => try self.solveScopeNodeType(node_ptr),
+        .@"if" => try self.solveIfNodeType(node_ptr),
         .add, .sub, .mul, .div, .equal, .not_equal => try self.solveBinaryNodeType(node_ptr),
+        .call => try self.solveCallNodeType(node_ptr),
         .member => try self.solveMemberNodeType(node_ptr),
-        .field_decl, .func_proto, .func_param => {},
-        else => {},
+        .import_relative_module, .range, .field_decl, .func_proto, .func_param => {},
+        .tuple, .slice => {},
     }
 }
 
@@ -201,6 +218,7 @@ fn solveFunctionNodeType(self: *Self, node_ptr: usize) !void {
         const name = self.ast.literals.items[self.data[arg.lhs].lhs];
         const ty = self.solveType(arg.rhs).?;
 
+        self.context.types[child_ptr] = ty;
         try self.addSymbol(name, false, ty);
     }
 
@@ -257,13 +275,33 @@ fn solveUndefinedNodeType(self: *Self, node_ptr: usize) void {
 }
 
 fn solveIntNodeType(self: *Self, node_ptr: usize) void {
-    self.context.types[node_ptr] = Type.builtin.U32;
-    self.current_type = Type.builtin.U32;
+    const ty = switch (self.expected_type.id) {
+        Type.builtin.U8.id,
+        Type.builtin.U16.id,
+        Type.builtin.U32.id,
+        Type.builtin.U64.id,
+        Type.builtin.S8.id,
+        Type.builtin.S16.id,
+        Type.builtin.S32.id,
+        Type.builtin.S64.id,
+        Type.builtin.F32.id,
+        Type.builtin.F64.id,
+        => self.expected_type,
+        else => Type.builtin.U32,
+    };
+
+    self.context.types[node_ptr] = ty;
+    self.current_type = ty;
 }
 
 fn solveFloatNodeType(self: *Self, node_ptr: usize) void {
     self.context.types[node_ptr] = Type.builtin.F32;
     self.current_type = Type.builtin.F32;
+}
+
+fn solveBoolNodeType(self: *Self, node_ptr: usize) void {
+    self.context.types[node_ptr] = Type.builtin.BOOL;
+    self.current_type = Type.builtin.BOOL;
 }
 
 fn solveIdentNodeType(self: *Self, node_ptr: usize) void {
@@ -324,6 +362,55 @@ fn solveArrayLiteralNodeType(self: *Self, node_ptr: usize) !void {
     });
 }
 
+fn solveScopeNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    for (data.lhs..data.rhs) |child_ptr| {
+        try self.solveNodeType(child_ptr);
+    }
+
+    self.current_type = Type.builtin.VOID;
+}
+
+fn solveIfNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+    const elements = data.rhs - data.lhs + 1;
+
+    const cond = c: {
+        const exp = self.expected_type;
+        defer self.expected_type = exp;
+        self.expected_type = Type.builtin.BOOL;
+
+        try self.solveNodeType(data.lhs);
+
+        break :c self.current_type;
+    };
+
+    if (cond.id != Type.builtin.BOOL.id) {
+        self.diagnostic.report("condition must be a boolean", .{}, self.locs[data.lhs]);
+    }
+
+    if (elements == 2) {
+        try self.solveNodeType(data.lhs + 1);
+    } else if (elements == 3) {
+        try self.solveNodeType(data.lhs + 1);
+        const then = self.current_type;
+
+        const else_ = c: {
+            const exp = self.expected_type;
+            defer self.expected_type = exp;
+            self.expected_type = then;
+
+            try self.solveNodeType(data.lhs + 2);
+            break :c self.current_type;
+        };
+
+        if (then.id != else_.id) {
+            self.diagnostic.report("branches must have the same type", .{}, self.locs[data.lhs + 2]);
+        }
+    } else unreachable;
+}
+
 fn solveBinaryNodeType(self: *Self, node_ptr: usize) !void {
     const tag = self.tags[node_ptr];
     const data = self.data[node_ptr];
@@ -335,7 +422,9 @@ fn solveBinaryNodeType(self: *Self, node_ptr: usize) !void {
     const rhs = self.current_type;
 
     if (lhs.id != rhs.id) {
-        std.debug.print("Type mismatch\n", .{});
+        const loc = Location.span(self.locs[data.lhs], self.locs[data.rhs]);
+
+        self.diagnostic.report("types mismatch", .{}, loc);
     }
 
     switch (tag) {
@@ -346,6 +435,30 @@ fn solveBinaryNodeType(self: *Self, node_ptr: usize) !void {
             self.current_type = Type.builtin.BOOL;
         },
         else => unreachable,
+    }
+}
+
+fn solveCallNodeType(self: *Self, node_ptr: usize) !void {
+    const data = self.data[node_ptr];
+
+    const sym = self.solveSymbol(data.lhs) orelse return;
+    if (sym.tag != .func) {
+        self.diagnostic.report("not a function", .{}, self.locs[data.lhs]);
+        return;
+    }
+    const args = self.table.getSymbolsInScope(sym.data.func.args);
+
+    const exp = self.expected_type;
+    defer self.expected_type = exp;
+
+    for (data.lhs + 1..data.rhs, 0..) |child_ptr, idx| {
+        self.expected_type = args[idx].data.param.ty;
+        try self.solveNodeType(child_ptr);
+        const ty = self.current_type;
+
+        if (ty.id != self.expected_type.id) {
+            self.diagnostic.report("argument type mismatch {} {}", .{ self.expected_type.id, ty.id }, self.locs[child_ptr]);
+        }
     }
 }
 

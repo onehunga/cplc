@@ -24,6 +24,10 @@ pub fn getSymbols(self: *const Self, symbols: Symbols) []const Symbol {
     return self.symbols.items[symbols.start..][0..symbols.len];
 }
 
+pub fn getSymbolsInScope(self: *const Self, scope: Scope.Id) []const Symbol {
+    return self.getSymbols(self.scopes.items[scope].symbols);
+}
+
 pub fn lookupSymbol(self: *const Self, scope: Scope.Id, name: []const u8) ?Symbol {
     const symbols = self.getSymbols(self.scopes.items[scope].symbols);
 
@@ -67,6 +71,7 @@ pub const Symbol = struct {
         import,
         @"struct",
         func,
+        param,
         field,
         @"var",
     };
@@ -76,9 +81,16 @@ pub const Symbol = struct {
         import: ImportData,
         @"struct": StructData,
         func: FunctionData,
+        param: ParamData,
 
         pub const empty: Data = .{
             .none = void{},
+        };
+
+        pub const initialParam: Data = .{
+            .param = ParamData{
+                .ty = Type.builtin.UNKNOWN,
+            },
         };
     };
 };
@@ -95,4 +107,8 @@ pub const StructData = struct {
 pub const FunctionData = struct {
     args: Scope.Id,
     body: Scope.Id,
+};
+
+pub const ParamData = struct {
+    ty: Type.Id,
 };

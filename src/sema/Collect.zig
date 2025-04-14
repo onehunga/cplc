@@ -159,9 +159,9 @@ fn collectParameter(self: *Self, idx: usize) void {
     const name = self.ast.literals.items[name_idx];
 
     const sym: Table.Symbol = .{
-        .tag = .field,
+        .tag = .param,
         .name = name,
-        .data = .empty,
+        .data = .initialParam,
         .ref = @truncate(idx),
     };
     self.addToScratch(sym);
