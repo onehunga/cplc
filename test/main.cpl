@@ -2,7 +2,7 @@ import foo;
 
 // comment
 func main() bool {
-	var a u32 = 0;
+	var a bool = true;
 	var b [u32] = [1, 2];
 	var c (u32, u32, [u32]) = (1, 2, [1, 2, 3]);
 	var fo foo.Foo = undefined;
@@ -11,15 +11,16 @@ func main() bool {
 	if true {
 		return 4.20 == 6.9;
 	};
-	if 1 == 2 0 else {
+	if 1 == 2 {
+	} else {
 		return 1 == 2;
 	};
 
-	foo(1, 2,);
+	add(1, 2,);
 
-	return 1 + 2 * 3;
+	return 1 == 2 * 3;
 }
 
-func add(foo u32, bar u32,) void {
+func add(foo s32, bar s32) s32 {
 	return foo + bar;
 }

@@ -1,6 +1,6 @@
 //! solves the types of the AST nodes
 //!
-//! for now it will also do some type checking
+//! for now it will also do the type checking
 
 const Self = @This();
 const std = @import("std");
@@ -65,6 +65,8 @@ context: TypeContext,
 /// the current resolved type
 current_type: Type.Id = Type.builtin.UNKNOWN,
 expected_type: Type.Id = Type.builtin.UNKNOWN,
+
+expected_return: ?Type.Id = null,
 
 symbols: std.ArrayListUnmanaged(CodeSymbol) = .empty,
 
@@ -211,6 +213,10 @@ fn solveFunctionNodeType(self: *Self, node_ptr: usize) !void {
     self.current_scope = sym.data.func.args;
 
     const proto = self.data[data.lhs + 1];
+    const return_type = self.solveType(proto.lhs).?;
+    const last_return = self.expected_return;
+    defer self.expected_return = last_return;
+    self.expected_return = return_type;
 
     for (proto.lhs + 1..proto.rhs) |child_ptr| {
         const arg = self.data[child_ptr];
@@ -263,9 +269,15 @@ fn solveVariableNodeType(self: *Self, node_ptr: usize) !void {
 
 fn solveReturnNodeType(self: *Self, node_ptr: usize) !void {
     const data = self.data[node_ptr];
+    self.expected_type = self.expected_return.?;
 
     if (data.lhs != 0) {
         try self.solveNodeType(data.lhs);
+
+        const exp = self.expected_return.?;
+        if (self.current_type.id != exp.id) {
+            self.diagnostic.report("return type mismatch", .{}, self.locs[data.lhs]);
+        }
     }
 }
 
